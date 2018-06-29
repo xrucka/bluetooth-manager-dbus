@@ -143,11 +143,25 @@ public class BluezFactory implements BluetoothObjectFactory {
             return;
         } else if (iface.equals(BluezCommons.BLUEZ_IFACE_DEVICE)) {
             logger.debug("{}: discovered bluetooth device", objpath);
+
+            // ensure adapter exists before device gets added
+            String adapterPath = BluezCommons.parsePath(objpath, BluezAdapter.class);
+            BluezAdapter adapter = context.getManagedAdapter(adapterPath, true);
+
             BluezDevice device = context.getManagedDevice(objpath);
             device.getCache().update(vals);
             return;
         } else if (iface.equals(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC)) {
             logger.debug("{}: discovered bluetooth service characteristic", objpath);
+
+            // ensure adapter & device exist before characteristic gets added
+            String devicePath = BluezCommons.parsePath(objpath, BluezDevice.class);
+            BluezDevice device = context.getManagedDevice(devicePath);
+            if (device == null) {
+                // probe characteristic some time later
+                return;
+            }
+
             BluezCharacteristic characteristic = context.getManagedCharacteristic(objpath);
             characteristic.getCache().update(vals);
             return;
@@ -209,6 +223,7 @@ public class BluezFactory implements BluetoothObjectFactory {
             throw new BluezException("Error populating adapters, got no objects");
         }
 
+        // ensure adapters are populated before adding devices
         allObjects.entrySet().stream()
             .filter((entry) -> { return adapterPattern.matcher(entry.getKey().toString()).matches(); })
             .forEach((entry) -> {
