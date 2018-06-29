@@ -68,13 +68,10 @@ class BluezDevice extends BluezObjectBase implements Device {
         // setup default values of cached attributes
         // todo following
         try {
-            this.remoteInterface = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME,
-                dbusObjectPath, Device1.class);
+            this.remoteInterface = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Device1.class);
         } catch (DBusException e) {
             throw new BluezException("Unable to access dbus objects for " + dbusObjectPath, e); 
         }
-
-        setupHandlers();
 
         cache.set("Blocked", new Boolean(false));
         cache.set("Connected", new Boolean(false));
@@ -93,6 +90,7 @@ class BluezDevice extends BluezObjectBase implements Device {
 
         cache.set("url", BluezCommons.DBUSB_PROTOCOL_NAME + "://XX:XX:XX:XX:XX:XX/YY:YY:YY:YY:YY:YY");
 
+        setupHandlers();
         updateURL();
     }
 

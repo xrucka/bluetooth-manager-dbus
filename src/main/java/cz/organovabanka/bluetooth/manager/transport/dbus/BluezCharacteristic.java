@@ -99,8 +99,6 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
             throw new BluezException("Unable to bind remote object interface on " + dbusObjectPath + ": " + e.getMessage(), e);
         }
 
-        setupHandlers();
-
 	Vector<String> dummy = new Vector();
 	dummy.add("none");
 
@@ -110,6 +108,7 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
         cache.set("url", BluezCommons.DBUSB_PROTOCOL_NAME 
             + "://XX:XX:XX:XX:XX:XX/YY:YY:YY:YY:YY:YY/0000180f-0000-1000-8000-00805f9b34fb/00002a19-0000-1000-8000-00805f9b34fb");
 
+        setupHandlers();
         updateURL();
     }
 

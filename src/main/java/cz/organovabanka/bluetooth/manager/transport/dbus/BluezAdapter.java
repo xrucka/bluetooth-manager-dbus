@@ -69,8 +69,6 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
             throw new BluezException("Unable to access dbus objects for " + dbusObjectPath, e); 
         }
 
-        setupHandlers();
-
         cache.set("Powered", new Boolean(false));
         cache.set("Discovering", new Boolean(false));
         cache.set("Discoverable", new Boolean(false));
@@ -84,6 +82,7 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
 
         cache.set("url", BluezCommons.DBUSB_PROTOCOL_NAME + "://XX:XX:XX:XX:XX:XX/YY:YY:YY:YY:YY:YY");
 
+        setupHandlers();
         updateURL();
     }
 
