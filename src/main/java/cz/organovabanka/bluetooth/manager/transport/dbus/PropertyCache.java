@@ -40,7 +40,7 @@ public class PropertyCache implements Properties.Cache {
         ;
     }
 
-    public <T> void update(String name, T value) {
+    public void update(String name, Object value) {
         if ("url".equals(name) && values.containsKey(name)) {
             return;
         }
@@ -55,13 +55,14 @@ public class PropertyCache implements Properties.Cache {
 
     public <T> T get(String name) {
         Variant v = values.get(name);
-        while ("v".equals(v.getSig())) {
-            v = (Variant)v.getValue();
-        }
         return (T)(v.getValue());
     }
 
-    public <T> void set(String name, T value) {
-        values.put(name, new Variant(value));
+    public void set(String name, Object value) {
+        if (Variant.class.isInstance(value)) {
+            values.put(name, (Variant)value);
+        } else {
+            values.put(name, new Variant(value));
+        }
     }
 }
