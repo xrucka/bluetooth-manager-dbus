@@ -54,8 +54,7 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.BluezFactory;
 import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezService;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Device1;
-import cz.organovabanka.bluetooth.manager.transport.dbus.virtualized.Battery1;
-import cz.organovabanka.bluetooth.manager.transport.dbus.virtualized.BatteryService;
+import cz.organovabanka.bluetooth.manager.transport.dbus.virtualized.VirtualServiceInjector;
 
 /**
  * A class representing Bluez devices.
@@ -229,12 +228,11 @@ public class NativeBluezDevice extends AbstractBluezDevice {
 
     /* subtree list */
     
-    @Override
-    public List<Service> getServices() throws BluezException {
-        getLogger().trace("{}: Listing resolved services", dbusObjectPath);
+    private void enrollNativeServices(List<Service> alreadyDiscovered) throws BluezException {
+        getLogger().trace("{}: Listing resolved native GATT services", dbusObjectPath);
 
         if (!isConnected()) {
-            return Collections.emptyList();
+            return;
         }
 
         Pattern servicePattern = Pattern.compile(
@@ -251,11 +249,11 @@ public class NativeBluezDevice extends AbstractBluezDevice {
         }
 
         if (allObjects == null) {
-            return Collections.emptyList();
+            return;
         }
 
         try {
-	        return Collections.unmodifiableList(
+	        alreadyDiscovered.addAll(
                 allObjects.entrySet().stream()
                 .map((entry) -> { return entry.getKey().toString(); })
                 .filter((path) -> { return servicePattern.matcher(path).matches(); })
@@ -265,6 +263,25 @@ public class NativeBluezDevice extends AbstractBluezDevice {
         } catch (RuntimeException e) {
             throw new BluezException("Unable to unpack bluez objects when processing " + dbusObjectPath, e);
         }
+    }
+
+    private void enrollVirtualServices(List<Service> alreadyDiscovered) throws BluezException {
+        getLogger().trace("{}: Listing resolved virtual GATT services", dbusObjectPath);
+
+        for (VirtualServiceInjector vf : context.getServiceInjectors()) {
+            vf.inject(this, alreadyDiscovered);
+        }
+    }
+
+    @Override
+    public List<Service> getServices() throws BluezException {
+        getLogger().trace("{}: Listing resolved services", dbusObjectPath);
+
+        List<Service> discovered = new ArrayList();
+        enrollNativeServices(discovered);
+        enrollVirtualServices(discovered);
+
+        return discovered;
     }
 
     @Override

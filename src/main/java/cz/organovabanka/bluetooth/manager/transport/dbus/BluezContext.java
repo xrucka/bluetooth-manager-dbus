@@ -46,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
@@ -59,6 +60,7 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezDevice;
 import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezCharacteristic;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
+import cz.organovabanka.bluetooth.manager.transport.dbus.virtualized.VirtualServiceInjector;
 
 /**
  * Context class for all Bluez related stuff
@@ -79,6 +81,9 @@ public class BluezContext {
     private Map<String, AbstractBluezAdapter> adapters = new ConcurrentHashMap();
     private Map<String, AbstractBluezDevice> devices = new ConcurrentHashMap();
     private Map<String, AbstractBluezCharacteristic> characteristics = new ConcurrentHashMap();
+
+    // virtual service injectors
+    private Set<VirtualServiceInjector> serviceInjectors = new CopyOnWriteArraySet();
 
     public BluezContext() throws BluezException {
         try {
@@ -150,6 +155,14 @@ public class BluezContext {
     public void rebind() {
         unbind();
         bind();
+    }
+    
+    public Set<VirtualServiceInjector> getServiceInjectors() {
+        return Collections.unmodifiableSet(serviceInjectors);
+    }
+
+    public void addServiceInjector(VirtualServiceInjector injector) {
+        serviceInjectors.add(injector);
     }
 
     public DBusConnection getDbusConnection() {
