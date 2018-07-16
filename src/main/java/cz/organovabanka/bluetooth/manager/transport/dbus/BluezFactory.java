@@ -64,6 +64,7 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezCharacteri
 //import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezService;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
+import cz.organovabanka.bluetooth.manager.transport.dbus.virtualized.BatteryServiceInjector;
 
 /**
  * A Bluetooth Manager Transport abstraction layer implementation based on java dbus binding.
@@ -94,6 +95,7 @@ public class BluezFactory implements BluetoothObjectFactory {
             logger.info("Found running bluetooth daemon, connecting & populating...");
 
             context.bind();
+
             populate();
         };
     }
@@ -134,6 +136,8 @@ public class BluezFactory implements BluetoothObjectFactory {
 
     public BluezFactory() throws BluezException {
         context = new BluezContext();
+
+        context.addServiceInjector(new BatteryServiceInjector(context));
 
         context.setupHandlers(new AddedHandler(), new RemovedHandler(), new PropertiesChangedHandler(context));
         repopulationService.schedule(binder, 0, SECONDS);
