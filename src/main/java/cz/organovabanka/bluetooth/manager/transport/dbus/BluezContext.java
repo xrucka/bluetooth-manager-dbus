@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 
 import org.sputnikdev.bluetooth.URL;
 
+import java.util.function.Supplier;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -50,6 +51,12 @@ import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezCharacteristic;
+import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezCharacteristic;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
 
@@ -69,9 +76,9 @@ public class BluezContext {
     private DBusSigHandler<Properties.PropertiesChanged> propertiesChangedHandler = null;
 
     // keep handlers for distinct object paths
-    private Map<String, BluezAdapter> adapters = new ConcurrentHashMap();
-    private Map<String, BluezDevice> devices = new ConcurrentHashMap();
-    private Map<String, BluezCharacteristic> characteristics = new ConcurrentHashMap();
+    private Map<String, AbstractBluezAdapter> adapters = new ConcurrentHashMap();
+    private Map<String, AbstractBluezDevice> devices = new ConcurrentHashMap();
+    private Map<String, AbstractBluezCharacteristic> characteristics = new ConcurrentHashMap();
 
     public BluezContext() throws BluezException {
         try {
@@ -149,17 +156,17 @@ public class BluezContext {
         return busConnection;
     }
 
-    public BluezAdapter getManagedAdapter(String path) throws BluezException {
+    public AbstractBluezAdapter getManagedAdapter(String path) throws BluezException {
         return getManagedAdapter(path, true);
     }
 
-    public BluezAdapter getManagedAdapter(String path, boolean create) throws BluezException {
-        BluezAdapter adapter = adapters.get(path);
+    public AbstractBluezAdapter getManagedAdapter(String path, Supplier<AbstractBluezAdapter> constructor) throws BluezException {
+        AbstractBluezAdapter adapter = adapters.get(path);
         if (adapter != null) {
             return adapter;
         }
 
-        if (!create) {
+        if (constructor == null) {
              //throw new BluezException("No such adapter managed: " + path);
              return null;
         }
@@ -169,14 +176,27 @@ public class BluezContext {
                 return adapters.get(path);
             }
 
-            adapters.putIfAbsent(path, new BluezAdapter(this, path));
+            adapters.putIfAbsent(path, constructor.get());
             return adapters.get(path);
         }
     }
 
-    public BluezAdapter getManagedAdapter(URL url) throws BluezException {
+    public AbstractBluezAdapter getManagedAdapter(String path, boolean create) throws BluezException {
+        Supplier<AbstractBluezAdapter> constructor = null;
+        if (create) {
+            BluezContext context = this;
+            constructor = new Supplier() {
+                public AbstractBluezAdapter get() {
+                    return new NativeBluezAdapter(context, path);
+                }
+            };
+        }
+        return getManagedAdapter(path, constructor);
+    }
+
+    public AbstractBluezAdapter getManagedAdapter(URL url) throws BluezException {
         // extremly ineffective :-/
-        for (BluezAdapter adapter : adapters.values()) {
+        for (AbstractBluezAdapter adapter : adapters.values()) {
             if (url.getAdapterURL().equals(adapter.getURL())) {
                 return adapter;
             }
@@ -185,7 +205,7 @@ public class BluezContext {
         return null;
     }
 
-    public Collection<BluezAdapter> getManagedAdapters() {
+    public Collection<AbstractBluezAdapter> getManagedAdapters() {
         return adapters.values();
     }
 
@@ -204,27 +224,40 @@ public class BluezContext {
             }
         }
         
-        BluezAdapter adapter = adapters.get(path);
+        AbstractBluezAdapter adapter = adapters.get(path);
         if (adapter == null) {
             return;
         }
 
-        BluezAdapter.dispose(adapter, doRemoteCalls, recurse);
+        adapter.dispose(doRemoteCalls, recurse);
         adapters.remove(path);
     }
 
-    public BluezDevice getManagedDevice(String path) throws BluezException {
+    public AbstractBluezDevice getManagedDevice(String path) throws BluezException {
         return getManagedDevice(path, true);
     }
 
-    public BluezDevice getManagedDevice(String path, boolean create) throws BluezException {
-        BluezDevice device = devices.get(path);
+    public AbstractBluezDevice getManagedDevice(String path, boolean create) throws BluezException {
+        Supplier<AbstractBluezDevice> constructor = null;
+        if (create) {
+            BluezContext context = this;
+            constructor = new Supplier() {
+                public AbstractBluezDevice get() {
+                    return new NativeBluezDevice(context, path);
+                }
+            };
+        }
+        return getManagedDevice(path, constructor);
+    }
+
+    public AbstractBluezDevice getManagedDevice(String path, Supplier<AbstractBluezDevice> constructor) throws BluezException {
+        AbstractBluezDevice device = devices.get(path);
 
         if (device != null) {
             return device;
         }
 
-        if (!create) {
+        if (constructor == null) {
             logger.trace("{}: will not manage device", path);
             return null;
         }
@@ -235,14 +268,14 @@ public class BluezContext {
             }
 
             logger.trace("{}: created handle for bluetooth device", path);
-            devices.putIfAbsent(path, new BluezDevice(this, path));
+            devices.putIfAbsent(path, constructor.get());
             return devices.get(path);
         }
     }
 
-    public BluezDevice getManagedDevice(URL url) throws BluezException {
+    public AbstractBluezDevice getManagedDevice(URL url) throws BluezException {
 	// consider getting better url?
-        for (BluezDevice device : devices.values()) {
+        for (AbstractBluezDevice device : devices.values()) {
             if (url.getDeviceURL().equals(device.getURL())) {
                 return device;
             }
@@ -251,7 +284,7 @@ public class BluezContext {
         return null;
     }
 
-    public Collection<BluezDevice> getManagedDevices() {
+    public Collection<AbstractBluezDevice> getManagedDevices() {
         return devices.values();
     }
 
@@ -270,26 +303,40 @@ public class BluezContext {
             }
         }
         
-        BluezDevice device = (devices.get(path));
+        AbstractBluezDevice device = (devices.get(path));
         if (device == null) {
             return;
         }
 
-        BluezDevice.dispose(device, doRemoteCalls, recurse);
+        device.dispose(doRemoteCalls, recurse);
         devices.remove(path);
     }
 
-    public BluezCharacteristic getManagedCharacteristic(String path) throws BluezException {
+    public AbstractBluezCharacteristic getManagedCharacteristic(String path) throws BluezException {
         return getManagedCharacteristic(path, true);
     }
 
-    public BluezCharacteristic getManagedCharacteristic(String path, boolean create) throws BluezException {
-        BluezCharacteristic characteristic = characteristics.get(path);
+    public AbstractBluezCharacteristic getManagedCharacteristic(String path, boolean create) throws BluezException {
+        Supplier<AbstractBluezCharacteristic> constructor = null;
+        if (create) {
+            BluezContext context = this;
+            constructor = new Supplier<AbstractBluezCharacteristic>(){
+                public AbstractBluezCharacteristic get() {
+                    return new NativeBluezCharacteristic(context, path);
+                }
+            };
+        }
+
+        return getManagedCharacteristic(path, constructor);
+    }
+
+    public AbstractBluezCharacteristic getManagedCharacteristic(String path, Supplier<AbstractBluezCharacteristic> constructor) throws BluezException {
+        AbstractBluezCharacteristic characteristic = characteristics.get(path);
         if (characteristic != null) {
             return characteristic;
         }
 
-        if (!create) {
+        if (constructor == null) {
             //throw new BluezException("No such characteristic managed: " + path);
             return null;
         }
@@ -300,14 +347,14 @@ public class BluezContext {
             }
 
             logger.trace("{}: created handle for bluetooth characteristic", path);
-            characteristics.putIfAbsent(path, new BluezCharacteristic(this, path));
+            characteristics.putIfAbsent(path, constructor.get());
             return characteristics.get(path);
         }
     }
 
-    public BluezCharacteristic getManagedCharacteristic(URL url) throws BluezException {
+    public AbstractBluezCharacteristic getManagedCharacteristic(URL url) throws BluezException {
 
-        BluezDevice device = getManagedDevice(url);
+        AbstractBluezDevice device = getManagedDevice(url);
         if (device == null) {
             logger.trace("Unable to access bluetooth service characteristic, as corresponding device is not managed: {}", url.toString());
             return null;
@@ -315,12 +362,12 @@ public class BluezContext {
 
         String devicePath = device.getPath();
 
-        for (Map.Entry<String, BluezCharacteristic> entry : characteristics.entrySet()) {
+        for (Map.Entry<String, AbstractBluezCharacteristic> entry : characteristics.entrySet()) {
             if (!entry.getKey().startsWith(devicePath)) {
                 continue;
             }
 
-            BluezCharacteristic characteristic = entry.getValue();
+            AbstractBluezCharacteristic characteristic = entry.getValue();
             if (characteristic.getUUID().equalsIgnoreCase(url.getCharacteristicUUID())) {
                 return characteristic;
             }
@@ -332,24 +379,24 @@ public class BluezContext {
     }
 
     public synchronized void disposeCharacteristic(String path, boolean doRemoteCalls, boolean recurse) throws BluezException {
-        BluezCharacteristic characteristic = characteristics.get(path);
+        AbstractBluezCharacteristic characteristic = characteristics.get(path);
         if (characteristic == null) {
             return;
         }
 
-        BluezCharacteristic.dispose(characteristic, doRemoteCalls, recurse);
+        characteristic.dispose(doRemoteCalls, recurse);
         characteristics.remove(path);
     }
 
 
     public synchronized void dispose() {
-        for (BluezDevice device : devices.values()) {
-            BluezDevice.dispose(device, true, true);
+        for (AbstractBluezDevice device : devices.values()) {
+            device.dispose(true, true);
         }
         devices.clear();
 
-        for (BluezAdapter adapter : adapters.values()) {
-            BluezAdapter.dispose(adapter, true, true);
+        for (AbstractBluezAdapter adapter : adapters.values()) {
+            adapter.dispose(true, true);
         }
         adapters.clear();
 

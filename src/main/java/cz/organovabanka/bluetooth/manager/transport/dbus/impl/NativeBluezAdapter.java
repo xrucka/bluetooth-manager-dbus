@@ -1,4 +1,4 @@
-package cz.organovabanka.bluetooth.manager.transport.dbus;
+package cz.organovabanka.bluetooth.manager.transport.dbus.impl;
 
 /*-
  * #%L
@@ -44,23 +44,27 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezFactory;
+import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezDevice;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Adapter1;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 
 /**
- * A class representing Bluez adapters.
+ * An commons abstract class for Bluez-based Adapters.
  * @author Lukas Rucka
  */
-class BluezAdapter extends BluezObjectBase implements Adapter {
+public class NativeBluezAdapter extends AbstractBluezAdapter {
 
-    private static final Logger logger = LoggerFactory.getLogger(BluezAdapter.class);
+    private static final Logger logger = LoggerFactory.getLogger(NativeBluezAdapter.class);
 
     private final Adapter1 remoteInterface;
 
-    private Notification<Boolean> notificationDiscovering = null;
-    private Notification<Boolean> notificationPowered = null;
-
-    BluezAdapter(BluezContext context, String dbusObjectPath) throws BluezException {
+    public NativeBluezAdapter(BluezContext context, String dbusObjectPath) throws BluezException {
         super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_ADAPTER);
 
         try {
@@ -68,19 +72,6 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         } catch (DBusException e) {
             throw new BluezException("Unable to access dbus objects for " + dbusObjectPath, e); 
         }
-
-        cache.set("Powered", new Boolean(false));
-        cache.set("Discovering", new Boolean(false));
-        cache.set("Discoverable", new Boolean(false));
-
-        cache.set("Address", "XX:XX:XX:XX:XX:XX");
-
-        cache.set("Alias", "Unknown");
-        cache.set("Name", "Unknown");
-
-        cache.set("Class", new UInt32(0));
-
-        cache.set("url", BluezCommons.DBUSB_PROTOCOL_NAME + "://XX:XX:XX:XX:XX:XX/YY:YY:YY:YY:YY:YY");
 
         setupHandlers();
         updateURL();
@@ -107,12 +98,14 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         });
     }
 
+    @Override
     protected Logger getLogger() {
         return logger;
     }
 
     /* dbus & openhab handles */
 
+    @Override
     protected void updateURL() {
         try {
             cache.set("url", BluezCommons.DBUSB_PROTOCOL_NAME + "://" + getAddress());
@@ -202,6 +195,7 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         return isDiscovering();
     }
 
+    //@Override
     public void removeDevice(String devicePath) {
         getLogger().debug("{}: Remove device {}", dbusObjectPath, devicePath);
         try {
@@ -209,32 +203,6 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         } catch (RuntimeException e) { 
             getLogger().error("{}: Failed to remove device {}, reason: {}", dbusObjectPath, devicePath, e.getMessage()); 
         }
-    }
-
-    /* notification setters */
-
-    @Override
-    public void enablePoweredNotifications(Notification<Boolean> notification) {
-        //getLogger().trace("{}: Enable powered notifications", dbusObjectPath);
-        notificationPowered = notification;
-    }
-
-    @Override
-    public void disablePoweredNotifications() {
-        //getLogger().trace("{}: Disable powered notifications", dbusObjectPath);
-        notificationPowered = null;
-    }
-
-    @Override
-    public void enableDiscoveringNotifications(Notification<Boolean> notification) {
-        //getLogger().trace("{}: Enable discovering notifications", dbusObjectPath);
-        notificationDiscovering = notification;
-    }
-
-    @Override
-    public void disableDiscoveringNotifications() {
-        //getLogger().trace("{}: Disable discovering notifications", dbusObjectPath);
-        notificationDiscovering = null;
     }
 
     /* subtree list */
@@ -254,7 +222,7 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         }
 
         try {
-            List<BluezDevice> allDevices = allObjects.entrySet().stream()
+            List<Device> allDevices = allObjects.entrySet().stream()
                 .map((entry) -> { return entry.getKey().toString(); })
                 .filter((path) -> { return devicePattern.matcher(path).matches(); })
                 .map((path) -> { return context.getManagedDevice(path, true); })
@@ -266,6 +234,7 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         }
     }
 
+    @Override
     protected void disposeRemote() {
         // remote part
         if (!allowRemoteCalls) {
@@ -275,35 +244,21 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         stopDiscoveryRemote();
     }
 
-    protected void disposeLocal(boolean doRemoteCalls, boolean recurse) {
-        // local part
-
-        // first disable notifications
-        disableDiscoveringNotifications();
-        disablePoweredNotifications();
-        // todo: consider recursive on devices
-    }
-
-    public static void dispose(BluezAdapter obj, boolean doRemoteCalls, boolean recurse) { 
-        logger.debug("{}:{} Disposing characteristic", obj.dbusObjectPath, obj.getURL().getAdapterAddress());
-        BluezObjectBase.dispose(obj, doRemoteCalls, recurse);
-    }
-
     /* access attributes */
-
     private void getAddressRemote() {
         // remote - update cache
         // property - no action if read fails
         this.<String>attemptCachedPropertyUpdate("Address");
     }
 
+    @Override
     public String getAddress() {
         // call remote part
         if (allowRemoteCalls) {
             getAddressRemote();
         }
         // local part
-        return cache.<String>get("Address");
+        return super.getAddress();
     }  
 
     private void getAliasRemote() {
@@ -319,7 +274,7 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
             getAliasRemote();
         }
         // local part
-        return cache.<String>get("Alias");
+        return super.getAlias();
     }  
 
     private void setAliasRemote(String alias) throws BluezException {
@@ -356,7 +311,7 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
             getNameRemote();
         }
         // local part
-        return cache.<String>get("Name");
+        return super.getName();
     }  
 
     /* link quality attributes */
@@ -367,13 +322,14 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         this.<UInt32>attemptCachedPropertyUpdate("Class");
     }   
 
+    @Override
     public int getBluetoothClass() {
         // call remote part
         if (allowRemoteCalls) {
             getBluetoothClassRemote();
         }
         // local part
-        return cache.<UInt32>get("Class").intValue();
+        return super.getBluetoothClass();
     }  
 
     /* discovery related attributes */
@@ -391,7 +347,7 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
             isDiscoveringRemote();
         }
         // local part
-        return cache.<Boolean>get("Discovering").booleanValue();
+        return super.isDiscovering();
     }  
 
 
@@ -408,7 +364,7 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
             isPoweredRemote();
         }
         // local part
-        return cache.<Boolean>get("Powered").booleanValue();
+        return super.isPowered();
     }  
 
     private void setPoweredRemote(boolean powered) throws BluezException {
@@ -455,13 +411,14 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         this.<Boolean>attemptCachedPropertyUpdate("Discoverable");
     }   
 
+    @Override
     public boolean isDiscoverable() {
         // call remote part
         if (allowRemoteCalls) {
             isDiscoverableRemote();
         }
         // local part
-        return cache.<Boolean>get("Discoverable").booleanValue();
+        return super.isDiscoverable();
     }  
 
     private void setDiscoverableRemote(boolean powered) throws BluezException {
@@ -476,6 +433,7 @@ class BluezAdapter extends BluezObjectBase implements Adapter {
         // do not update cache just yet
     }   
 
+    @Override
     public void setDiscoverable(boolean powered) throws BluezException {
         // call remote part
         if (allowRemoteCalls) {

@@ -66,7 +66,7 @@ import java.util.stream.Stream;
  * A common component for all Bluez objects.
  * @author Lukas Rucka
  */
-abstract class BluezObjectBase {
+public abstract class BluezObjectBase {
     // every method has remote + local part
     // order - first do remote, then local part
 
@@ -206,10 +206,6 @@ abstract class BluezObjectBase {
 
         disposeLocal(doRemoteCalls && allowRemoteCalls, recurse);
         disposeLocalRemoteInterlink();
-    }
-
-    public static void dispose(BluezObjectBase obj, boolean doRemoteCalls, boolean recurse) {
-        obj.dispose(doRemoteCalls, recurse);
     }
 
     protected <T> T callWithDispose(Callable<T> call, Runnable disposer) throws Exception, NotReadyException {

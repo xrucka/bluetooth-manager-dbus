@@ -1,4 +1,4 @@
-package cz.organovabanka.bluetooth.manager.transport.dbus;
+package cz.organovabanka.bluetooth.manager.transport.dbus.impl;
 
 /*-
  * #%L
@@ -36,6 +36,7 @@ import org.sputnikdev.bluetooth.manager.transport.Device;
 import org.sputnikdev.bluetooth.manager.transport.Notification;
 import org.sputnikdev.bluetooth.manager.transport.Service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -43,26 +44,29 @@ import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezService;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezFactory;
+import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezService;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Device1;
+import cz.organovabanka.bluetooth.manager.transport.dbus.virtualized.Battery1;
+import cz.organovabanka.bluetooth.manager.transport.dbus.virtualized.BatteryService;
 
 /**
  * A class representing Bluez devices.
  * @author Lukas Rucka
  */
-class BluezDevice extends BluezObjectBase implements Device {
-    private static final Logger logger = LoggerFactory.getLogger(BluezDevice.class);
+public class NativeBluezDevice extends AbstractBluezDevice {
+    private static final Logger logger = LoggerFactory.getLogger(NativeBluezDevice.class);
 
     private final Device1 remoteInterface;
 
-    private Notification<Short> notificationRssi = null;
-    private Notification<Boolean> notificationBlocked = null;
-    private Notification<Boolean> notificationConnected = null;
-    private Notification<Boolean> notificationServicesResolved = null;
-    private Notification<Map<String, byte[]>> notificationServiceData = null;
-    private Notification<Map<Short, byte[]>> notificationManufacturerData = null;
-
-    BluezDevice(BluezContext context, String dbusObjectPath) throws BluezException {
+    public NativeBluezDevice(BluezContext context, String dbusObjectPath) throws BluezException {
         super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_DEVICE);
 
         // setup default values of cached attributes
@@ -72,23 +76,6 @@ class BluezDevice extends BluezObjectBase implements Device {
         } catch (DBusException e) {
             throw new BluezException("Unable to access dbus objects for " + dbusObjectPath, e); 
         }
-
-        cache.set("Blocked", new Boolean(false));
-        cache.set("Connected", new Boolean(false));
-        cache.set("ServicesResolved", new Boolean(false));
-
-        cache.set("AddressType", "UNKNOWN");
-        cache.set("Address", "YY:YY:YY:YY:YY:YY");
-        cache.set("Adapter", "/org/bluez/hciX");
-
-        cache.set("Alias", "Unknown");
-        cache.set("Name", "Unknown");
-
-        cache.set("Class", new UInt32(0));
-        cache.set("RSSI", new Short((short)-100));
-        cache.set("TxPower", new Short((short)-100));
-
-        cache.set("url", BluezCommons.DBUSB_PROTOCOL_NAME + "://XX:XX:XX:XX:XX:XX/YY:YY:YY:YY:YY:YY");
 
         setupHandlers();
         updateURL();
@@ -168,26 +155,23 @@ class BluezDevice extends BluezObjectBase implements Device {
         });
     } 
 
+    @Override
     protected Logger getLogger() {
         return logger;
     }
 
     /* dbus & openhab handles */
 
+    @Override
     protected void updateURL() throws BluezException {
         try {
             String adapterPath = getAdapterPath();
-            BluezAdapter adapter = context.getManagedAdapter(adapterPath, false);
+            AbstractBluezAdapter adapter = context.getManagedAdapter(adapterPath, false);
             URL url = adapter.getURL().copyWithDevice(getAddress());
             cache.set("url", url.toString());
         } catch (BluezException e) {
             getLogger().error("{}: Unable to update URL, reason: {}", dbusObjectPath, e.getMessage());
         }
-    }
-
-    public String getAdapterPath() {
-        // local part only
-        return BluezCommons.parsePath(dbusObjectPath, BluezAdapter.class);
     }
 
     /* begin remote device methods */
@@ -217,33 +201,6 @@ class BluezDevice extends BluezObjectBase implements Device {
         return !isConnected();
     }
 
-/*
-2018-05-24 08:25:10.997 [INFO ] [h.manager.transport.dbus.BluezDevice] - Submitting notification on /org/bluez/hci1/dev_7C_2F_80_B1_87_25:ServicesResolved
-2018-05-24 08:25:11.001 [INFO ] [h.manager.transport.dbus.BluezDevice] - Submitting notification on /org/bluez/hci1/dev_7C_2F_80_B1_87_25:Connected
-2018-05-24 08:25:11.024 [WARN ] [impl.AbstractBluetoothObjectGovernor] - Error occurred while interacting (read) with native object: /00:1A:7D:DA:71:16/7C:2F:80:B1:87:2
-5/0000180a-0000-1000-8000-00805f9b34fb/00002a28-0000-1000-8000-00805f9b34fb : false : Unable to read value of /org/bluez/hci1/dev_7C_2F_80_B1_87_25/service0010/char0017
-: Not connected
-2018-05-24 08:25:11.029 [WARN ] [anager.impl.CompletableFutureService] - Bluetooth error happened while competing a future immediately: /XX:XX:XX:XX:XX:XX/7C:2F:80:B1:8
-7:25/0000180a-0000-1000-8000-00805f9b34fb/00002a28-0000-1000-8000-00805f9b34fb : Error occurred while interacting (read) with native object: /00:1A:7D:DA:71:16/7C:2F:80
-:B1:87:25/0000180a-0000-1000-8000-00805f9b34fb/00002a28-0000-1000-8000-00805f9b34fb : false : Unable to read value of /org/bluez/hci1/dev_7C_2F_80_B1_87_25/service0010/
-char0017: Not connected
-2018-05-24 08:25:11.047 [WARN ] [impl.AbstractBluetoothObjectGovernor] - Error occurred while interacting (read) with native object: /00:1A:7D:DA:71:16/7C:2F:80:B1:87:2
-5/0000180a-0000-1000-8000-00805f9b34fb/00002a29-0000-1000-8000-00805f9b34fb : false : Unable to read value of /org/bluez/hci1/dev_7C_2F_80_B1_87_25/service0010/char0011
-: Not connected
-2018-05-24 08:25:11.059 [WARN ] [impl.AbstractBluetoothObjectGovernor] - Error occurred while interacting (read) with native object: /00:1A:7D:DA:71:16/7C:2F:80:B1:87:2
-5/0000180a-0000-1000-8000-00805f9b34fb/00002a24-0000-1000-8000-00805f9b34fb : false : Unable to read value of /org/bluez/hci1/dev_7C_2F_80_B1_87_25/service0010/char0013
-: Not connected
-2018-05-24 08:25:11.062 [WARN ] [anager.impl.CompletableFutureService] - Bluetooth error happened while competing a future immediately: /XX:XX:XX:XX:XX:XX/7C:2F:80:B1:8
-7:25/0000180a-0000-1000-8000-00805f9b34fb/00002a29-0000-1000-8000-00805f9b34fb : Error occurred while interacting (read) with native object: /00:1A:7D:DA:71:16/7C:2F:80
-:B1:87:25/0000180a-0000-1000-8000-00805f9b34fb/00002a29-0000-1000-8000-00805f9b34fb : false : Unable to read value of /org/bluez/hci1/dev_7C_2F_80_B1_87_25/service0010/
-char0011: Not connected
-2018-05-24 08:25:11.065 [WARN ] [anager.impl.CompletableFutureService] - Bluetooth error happened while competing a future immediately: /XX:XX:XX:XX:XX:XX/7C:2F:80:B1:8
-7:25/0000180a-0000-1000-8000-00805f9b34fb/00002a24-0000-1000-8000-00805f9b34fb : Error occurred while interacting (read) with native object: /00:1A:7D:DA:71:16/7C:2F:80
-:B1:87:25/0000180a-0000-1000-8000-00805f9b34fb/00002a24-0000-1000-8000-00805f9b34fb : false : Unable to read value of /org/bluez/hci1/dev_7C_2F_80_B1_87_25/service0010/
-char0013: Not connected
-*/
-
-
     private void connectRemote() throws BluezException {
         if (!allowRemoteCalls) {
             // todo debug
@@ -270,80 +227,8 @@ char0013: Not connected
 
     /* notification setters */
 
-    @Override
-    public void enableBlockedNotifications(Notification<Boolean> notification) {
-        //getLogger().trace("{}:Blocked: Enable notifications", dbusObjectPath);
-        notificationBlocked = notification;
-    }
-
-    @Override
-    public void disableBlockedNotifications() {
-        //getLogger().trace("{}:Blocked: Disable notifications", dbusObjectPath);
-        notificationBlocked = null;
-    }
-
-    @Override
-    public void enableRSSINotifications(Notification<Short> notification) {
-        //getLogger().trace("{}:RSSI: Enable notifications", dbusObjectPath);
-        notificationRssi = notification;
-    }
-
-    @Override
-    public void disableRSSINotifications() {
-        //getLogger().trace("{}:RSSI: Disable notifications", dbusObjectPath);
-        notificationRssi = null;
-    }
-
-    @Override
-    public void enableConnectedNotifications(Notification<Boolean> notification) {
-        //getLogger().trace("{}:Connected: Enable notifications", dbusObjectPath);
-        notificationConnected = notification;
-    }
-
-    @Override
-    public void disableConnectedNotifications() {
-        //getLogger().trace("{}:Connected: Disable notifications", dbusObjectPath);
-        notificationConnected = null;
-    }
-
-    @Override
-    public void enableServicesResolvedNotifications(Notification<Boolean> notification) {
-        //getLogger().trace("{}:ServicesResolved: Enable notifications", dbusObjectPath);
-        notificationServicesResolved = notification;
-    }
-
-    @Override
-    public void disableServicesResolvedNotifications() throws BluezException {
-        //getLogger().trace("{}:ServicesResolved: Disable notifications", dbusObjectPath);
-        notificationServicesResolved = null;
-    }
-
-    @Override
-    public void enableServiceDataNotifications(Notification<Map<String, byte[]>> notification) {
-        //getLogger().trace("{}:ServiceData: Enable notifications", dbusObjectPath);
-        notificationServiceData = notification;
-    }
-
-    @Override
-    public void disableServiceDataNotifications() {
-        //getLogger().trace("{}:ServiceData: Disable notifications", dbusObjectPath);
-        notificationServiceData = null;
-    }
-
-    @Override
-    public void enableManufacturerDataNotifications(Notification<Map<Short, byte[]>> notification) {
-        //getLogger().trace("{}:ManufacturerData: Enable notifications", dbusObjectPath);
-        notificationManufacturerData = notification;
-    }
-
-    @Override
-    public void disableManufacturerDataNotifications() {
-        //getLogger().trace("{}:ManufacturerData: Disable notifications", dbusObjectPath);
-        notificationManufacturerData = null;
-    }
-
     /* subtree list */
-
+    
     @Override
     public List<Service> getServices() throws BluezException {
         getLogger().trace("{}: Listing resolved services", dbusObjectPath);
@@ -370,16 +255,19 @@ char0013: Not connected
         }
 
         try {
-            return Collections.unmodifiableList(allObjects.entrySet().stream()
+	        return Collections.unmodifiableList(
+                allObjects.entrySet().stream()
                 .map((entry) -> { return entry.getKey().toString(); })
                 .filter((path) -> { return servicePattern.matcher(path).matches(); })
-                .map((path) -> { return new BluezService(context, path); })
-                .collect(Collectors.toList()));
+                .map((path) -> { return new NativeBluezService(context, path); })
+                .collect(Collectors.toList())
+            );
         } catch (RuntimeException e) {
             throw new BluezException("Unable to unpack bluez objects when processing " + dbusObjectPath, e);
         }
     }
 
+    @Override
     protected void disposeRemote() {
         // remote part
         if (!allowRemoteCalls) {
@@ -387,23 +275,6 @@ char0013: Not connected
         }
 
         disconnectRemote();
-    }
-
-    protected void disposeLocal(boolean doRemoteCalls, boolean recurse) {
-        // local part
-
-        // first disable notifications
-        disableBlockedNotifications();
-        disableConnectedNotifications();
-        disableRSSINotifications();
-        disableServicesResolvedNotifications();
-        disableManufacturerDataNotifications();
-        disableServiceDataNotifications();
-    }
-
-    public static void dispose(BluezDevice obj, boolean doRemoteCalls, boolean recurse) { 
-        logger.trace("{}: Disposing device ({}/{})", obj.dbusObjectPath, obj.getURL().getAdapterAddress(), obj.getURL().getDeviceAddress());
-        BluezObjectBase.dispose(obj, doRemoteCalls, recurse);
     }
 
     /* access attributes */
@@ -414,24 +285,12 @@ char0013: Not connected
         this.<String>attemptCachedPropertyUpdate("AddressType");
     }
 
-    private BluetoothAddressType parseAddressType(String addressType) {
-        if ("public".equals(addressType)) {
-            return BluetoothAddressType.PUBLIC;
-        } else if ("random".equals(addressType)) {
-            return BluetoothAddressType.RANDOM;
-        } else {
-            return BluetoothAddressType.UNKNOWN;
-        }
-    }
-
     @Override
     public BluetoothAddressType getAddressType() {
         // call remote part
         getAddressTypeRemote();
-
         // local part
-        String addressType = cache.<String>get("AddressType");
-        return parseAddressType(addressType);
+        return super.getAddressType();
     }
 
     private void getAddressRemote() {
@@ -446,7 +305,7 @@ char0013: Not connected
             getAddressRemote();
         }
         // local part
-        return this.cache.<String>get("Address");
+        return super.getAddress();
     }  
 
     private void getAliasRemote() {
@@ -462,7 +321,7 @@ char0013: Not connected
             getAliasRemote();
         }
         // local part
-        return this.cache.<String>get("Alias");
+        return super.getAlias();
     }  
 
     private void setAliasRemote(String alias) throws BluezException {
@@ -499,7 +358,7 @@ char0013: Not connected
             getNameRemote();
         }
         // local part
-        return this.cache.<String>get("Name");
+        return super.getName();
     }  
 
     /* link quality attributes */
@@ -517,7 +376,7 @@ char0013: Not connected
             getTxPowerRemote();
         }
         // local part
-        return this.cache.<Short>get("TxPower").shortValue();
+        return super.getTxPower();
     }  
 
     private void getRSSIRemote() {
@@ -533,7 +392,7 @@ char0013: Not connected
             getRSSIRemote();
         }
         // local part
-        return this.cache.<Short>get("RSSI").shortValue();
+        return super.getRSSI();
     }  
 
     private void getBluetoothClassRemote() {
@@ -549,7 +408,7 @@ char0013: Not connected
             getBluetoothClassRemote();
         }
         // local part
-        return this.cache.<UInt32>get("Class").intValue();
+        return super.getBluetoothClass();
     }  
 
     /* connection related attributes */
@@ -567,7 +426,7 @@ char0013: Not connected
             isConnectedRemote();
         }
         // local part
-        return this.cache.<Boolean>get("Connected").booleanValue();
+        return super.isConnected();
     }  
 
     private void isTrustedRemote() {
@@ -582,7 +441,7 @@ char0013: Not connected
             isTrustedRemote();
         }
         // local part
-        return this.cache.<Boolean>get("Trusted").booleanValue();
+        return super.isTrusted();
     }  
 
     private void isPairedRemote() {
@@ -597,7 +456,7 @@ char0013: Not connected
             isPairedRemote();
         }
         // local part
-        return this.cache.<Boolean>get("Paired").booleanValue();
+        return super.isPaired();
     }  
 
     private void isBlockedRemote() {
@@ -613,7 +472,7 @@ char0013: Not connected
             isBlockedRemote();
         }
         // local part
-        return this.cache.<Boolean>get("Blocked").booleanValue();
+        return super.isPaired();
     }  
 
     private void setBlockedRemote(boolean blocked) throws BluezException {
@@ -650,39 +509,15 @@ char0013: Not connected
             isServicesResolvedRemote();
         }
         // local part
-        return this.cache.<Boolean>get("ServicesResolved").booleanValue();
-    }  
-
-    @Override
-    public boolean isBleEnabled() {
-        // local part hides call to remote
-        return getBluetoothClass() == 0;
+        return super.isServicesResolved();
     }  
 
     /* service/manufacturer */
-
-    private <K> Map<String, String> hexdump(Map<K, byte[]> raw) {
-        return raw.entrySet().stream().collect(Collectors.toMap(
-            entry -> entry.getKey().toString(),
-            entry -> DataConversionUtils.convert(entry.getValue(), 16)
-        ));
-    }
 
     private void getServiceDataRemote() {
         // remote - update cache
         // property - no action if read fails
         this.<Map<String, Variant>>attemptCachedPropertyUpdate("ServiceData");
-    }
-
-    private Map<String, byte[]> convertServiceData(Map<String, Variant> data) {
-        if (data == null) {
-            return Collections.emptyMap();
-        }
-
-        return data.entrySet().stream().collect(Collectors.toMap(
-            entry -> entry.getKey(),
-            entry -> (byte[])(entry.getValue().getValue())
-        ));
     }
 
     @Override
@@ -691,7 +526,7 @@ char0013: Not connected
         getServiceDataRemote();
 
         // and local part
-        return convertServiceData(this.cache.<Map<String, Variant>>get("ServiceData"));
+        return super.getServiceData();
     }
 
     private void getManufacturerDataRemote() {
@@ -700,23 +535,12 @@ char0013: Not connected
         this.<Map<Short, Variant>>attemptCachedPropertyUpdate("ManufacturerData");
     }
 
-    private Map<Short, byte[]> convertManufacturerData(Map<UInt16, Variant> data) {
-        if (data == null) {
-            return Collections.emptyMap();
-        }
-
-        return data.entrySet().stream().collect(Collectors.toMap(
-            entry -> entry.getKey().shortValue(),
-            entry -> (byte[])(entry.getValue().getValue())
-        ));
-    }
-
     @Override
     public Map<Short, byte[]> getManufacturerData() throws BluezException {
         // call remote part
         getManufacturerDataRemote();
 
         // and local part
-        return convertManufacturerData(this.cache.<Map<UInt16, Variant>>get("ManufacturerData"));
+        return super.getManufacturerData();
     }
 }

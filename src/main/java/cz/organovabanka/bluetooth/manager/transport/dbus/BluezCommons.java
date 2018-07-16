@@ -39,6 +39,10 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManage
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
+import org.sputnikdev.bluetooth.manager.transport.Adapter;
+import org.sputnikdev.bluetooth.manager.transport.Device;
+import org.sputnikdev.bluetooth.manager.transport.Service;
+import org.sputnikdev.bluetooth.manager.transport.Characteristic;
 
 import java.lang.Byte;
 import java.lang.IllegalArgumentException;
@@ -85,7 +89,7 @@ public class BluezCommons {
     }
 
     static final String parsePath(String objectPath, Class t) {
-        Class[] keys = { BluezAdapter.class, BluezDevice.class, BluezService.class, BluezCharacteristic.class, null };
+        Class[] keys = { Adapter.class, Device.class, Service.class, Characteristic.class, null };
         String[] patterns = {
             "^" + BLUEZ_DBUS_OBJECT + "/hci[0-9]+",
             "^" + BLUEZ_DBUS_OBJECT + "/hci[0-9]+/dev(_[0-9a-fA-F]{2}){6}",
@@ -157,7 +161,7 @@ public class BluezCommons {
         Pattern adapterPattern = BluezCommons.makeAdapterPathPattern();
         String adapterPath = matchBluezObject(allObjects, adapterPattern, BluezCommons.BLUEZ_IFACE_ADAPTER, "Address", adapterMac);
 
-        if (stopper == BluezAdapter.class) {
+        if (stopper == Adapter.class) {
             return adapterPath;
         }
         if (adapterPath == null) {
@@ -169,7 +173,7 @@ public class BluezCommons {
         Pattern devicePattern = BluezCommons.makeDevicePathPattern(adapterPath);
         String devicePath = matchBluezObject(allObjects, devicePattern, BluezCommons.BLUEZ_IFACE_DEVICE, "Address", deviceMac);
 
-        if (stopper == BluezDevice.class) {
+        if (stopper == Device.class) {
             return devicePath;
         }
         if (devicePath == null) {
@@ -181,7 +185,7 @@ public class BluezCommons {
         Pattern servicePattern = BluezCommons.makeServicePathPattern(devicePath);
         String servicePath = matchBluezObject(allObjects, servicePattern, BluezCommons.BLUEZ_IFACE_SERVICE, "UUID", serviceUuid);
 
-        if (stopper == BluezService.class) {
+        if (stopper == Service.class) {
             return servicePath;
         }
         if (servicePath == null) {
@@ -193,7 +197,7 @@ public class BluezCommons {
         Pattern characteristicPattern = BluezCommons.makeServicePathPattern(devicePath);
         String characteristicPath = matchBluezObject(allObjects, characteristicPattern, BluezCommons.BLUEZ_IFACE_SERVICE, "UUID", characteristicUuid);
 
-        if (stopper == BluezCharacteristic.class) {
+        if (stopper == Characteristic.class) {
             return characteristicPath;
         }
 

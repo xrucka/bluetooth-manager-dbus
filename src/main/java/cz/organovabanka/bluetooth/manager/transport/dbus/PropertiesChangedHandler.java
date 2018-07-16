@@ -24,6 +24,11 @@ import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusInterfaceName;
 import org.freedesktop.dbus.DBusSigHandler;
 
+import org.sputnikdev.bluetooth.manager.transport.Adapter;
+import org.sputnikdev.bluetooth.manager.transport.Characteristic;
+import org.sputnikdev.bluetooth.manager.transport.Device;
+import org.sputnikdev.bluetooth.manager.transport.Service;
+
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
 
 /**
@@ -45,11 +50,11 @@ public class PropertiesChangedHandler implements DBusSigHandler<Properties.Prope
         BluezObjectBase target = null;
 
         //synchronized (context) {
-            if (objpath.equals(BluezCommons.parsePath(objpath, BluezAdapter.class))) {
+            if (objpath.equals(BluezCommons.parsePath(objpath, Adapter.class))) {
                 target = context.getManagedAdapter(objpath, false);
-            } else if (objpath.equals(BluezCommons.parsePath(objpath, BluezDevice.class))) {
+            } else if (objpath.equals(BluezCommons.parsePath(objpath, Device.class))) {
                 target = context.getManagedDevice(objpath, false);
-            } else if (objpath.equals(BluezCommons.parsePath(objpath, BluezCharacteristic.class))) {
+            } else if (objpath.equals(BluezCommons.parsePath(objpath, Characteristic.class))) {
                 target = context.getManagedCharacteristic(objpath, false);
             }
         //}

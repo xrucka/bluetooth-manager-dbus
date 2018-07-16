@@ -1,4 +1,4 @@
-package cz.organovabanka.bluetooth.manager.transport.dbus;
+package cz.organovabanka.bluetooth.manager.transport.dbus.impl;
 
 /*-
  * #%L
@@ -25,6 +25,14 @@ import org.freedesktop.dbus.Path;
 import org.freedesktop.dbus.Variant;
 import org.freedesktop.dbus.exceptions.DBusException;
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezService;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezCharacteristic;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezFactory;
+import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezCharacteristic;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 
 import org.slf4j.Logger;
@@ -44,15 +52,11 @@ import java.util.stream.Collectors;
  * A class representing Bluez services.
  * @author Lukas Rucka
  */
-class BluezService extends BluezObjectBase implements Service {
-    private static final Logger logger = LoggerFactory.getLogger(BluezService.class);
+public class NativeBluezService extends AbstractBluezService {
+    private static final Logger logger = LoggerFactory.getLogger(NativeBluezService.class);
 
-    BluezService(BluezContext context, String dbusObjectPath) {
+    public NativeBluezService(BluezContext context, String dbusObjectPath) {
         super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_SERVICE);
-
-        // setup default values of cached attributes
-        cache.set("UUID", "invalid-uuid");
-        cache.set("url", BluezCommons.DBUSB_PROTOCOL_NAME + "://XX:XX:XX:XX:XX:XX/YY:YY:YY:YY:YY:YY/0000180f-0000-1000-8000-00805f9b34fb");
 
         updateURL();
     }
@@ -65,33 +69,13 @@ class BluezService extends BluezObjectBase implements Service {
         // this is the remote part of getURL
         try {
             String devicePath = getDevicePath();
-            BluezDevice device = new BluezDevice(context, devicePath);
+            AbstractBluezDevice device = context.getManagedDevice(devicePath, false);
             URL url = device.getURL().copyWithService(getUUID());
             cache.set("url", url.toString());
         } catch (BluezException e) {
             getLogger().error("{}: Unable to update URL, reason: {}", dbusObjectPath, e.getMessage());
         }
     }   
-
-    public String getDevicePath() {
-        // local part only
-        return BluezCommons.parsePath(dbusObjectPath, BluezDevice.class);
-    }   
-
-    protected void disposeRemote() {
-        // remote part
-        // nop
-    }   
-
-    protected void disposeLocal(boolean doRemoteCalls, boolean recurse) {
-        // local part
-        // nop
-    }
-
-    public static void dispose(BluezService service, boolean doRemoteCalls, boolean recurse) {
-        logger.debug("{}: Disposing service", service.getURL().getServiceUUID());
-        BluezObjectBase.dispose(service, doRemoteCalls, recurse);
-    }
 
     private void getUUIDRemote() {
         // remote - update cache
@@ -105,7 +89,7 @@ class BluezService extends BluezObjectBase implements Service {
             getUUIDRemote();
         }
         // local part
-        return this.cache.<String>get("UUID");
+        return super.getUUID();
     }  
 
     @Override
@@ -123,11 +107,11 @@ class BluezService extends BluezObjectBase implements Service {
         }
 
         try {
-            List<BluezCharacteristic> result = allObjects.entrySet().stream()
+            List<Characteristic> result = allObjects.entrySet().stream()
                 .filter((entry) -> { return characteristicPattern.matcher(entry.getKey().toString()).matches(); })
                 .map((entry) -> {
                     String objpath = entry.getKey().toString();
-                    BluezCharacteristic characteristic = context.getManagedCharacteristic(objpath, true);
+                    AbstractBluezCharacteristic characteristic = context.getManagedCharacteristic(objpath, true);
     
                     Map<String, Map<String, Variant>> interfaces = entry.getValue();
                     Map<String, Variant> vals = interfaces.get(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC);
@@ -141,5 +125,9 @@ class BluezService extends BluezObjectBase implements Service {
             throw new BluezException("Unable to unpack bluez objects when processing " + dbusObjectPath, e); 
         }
     }
-}
 
+    protected void disposeRemote() {
+        ;
+    }
+
+}

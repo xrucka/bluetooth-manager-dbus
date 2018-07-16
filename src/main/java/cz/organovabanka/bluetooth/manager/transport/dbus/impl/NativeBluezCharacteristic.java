@@ -1,4 +1,4 @@
-package cz.organovabanka.bluetooth.manager.transport.dbus;
+package cz.organovabanka.bluetooth.manager.transport.dbus.impl;
 
 /*-
  * #%L
@@ -34,6 +34,13 @@ import org.sputnikdev.bluetooth.manager.transport.Characteristic;
 import org.sputnikdev.bluetooth.manager.transport.CharacteristicAccessType;
 import org.sputnikdev.bluetooth.manager.transport.Notification;
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezCharacteristic;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezService;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezFactory;
+import cz.organovabanka.bluetooth.manager.transport.dbus.impl.NativeBluezService;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.GattCharacteristic1;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 
@@ -53,44 +60,13 @@ import java.util.stream.Stream;
  * A class representing gatt device characteristics (dbus implementation).
  * @author Lukas Rucka
  */
-class BluezCharacteristic extends BluezObjectBase implements Characteristic {
+public class NativeBluezCharacteristic extends AbstractBluezCharacteristic {
     private static final String CONFIGURATION_UUID = "00002902-0000-1000-8000-00805f9b34fb";
-    private static final Logger logger = LoggerFactory.getLogger(BluezCharacteristic.class);
-
-    private enum AccessTypeMapping {
-        broadcast(CharacteristicAccessType.BROADCAST),
-        read(CharacteristicAccessType.READ),
-        write_without_response(CharacteristicAccessType.WRITE_WITHOUT_RESPONSE),
-        write(CharacteristicAccessType.WRITE),
-        notify(CharacteristicAccessType.NOTIFY),
-        indicate(CharacteristicAccessType.INDICATE),
-        authenticated_signed_writes(CharacteristicAccessType.AUTHENTICATED_SIGNED_WRITES),
-
-        reliable_write(null),
-        writable_auxiliaries(null),
-        encrypt_read(null),
-        encrypt_write(null),
-        encrypt_authenticated(null),
-        encrypt_authenticated_write(null),
-        secure_read(null),
-        secure_write(null);
-
-        private final CharacteristicAccessType accessType;
-
-        AccessTypeMapping(CharacteristicAccessType accessType) {
-            this.accessType = accessType;
-        }
-
-        CharacteristicAccessType getAccessType() {
-            return accessType;
-        }
-    }
+    private static final Logger logger = LoggerFactory.getLogger(NativeBluezCharacteristic.class);
 
     private final GattCharacteristic1 remoteInterface;
 
-    private Notification<byte[]> notificationData = null;
-
-    BluezCharacteristic(BluezContext context, String dbusObjectPath) throws BluezException {
+    public NativeBluezCharacteristic(BluezContext context, String dbusObjectPath) throws BluezException {
         super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_CHARACTERISTIC);
 
         try {
@@ -98,15 +74,6 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
         } catch (DBusException e) {
             throw new BluezException("Unable to bind remote object interface on " + dbusObjectPath + ": " + e.getMessage(), e);
         }
-
-	Vector<String> dummy = new Vector();
-	dummy.add("none");
-
-        cache.set("Notifying", new Boolean(false));
-        cache.set("Flags", new Variant(dummy, "as"));
-        cache.set("UUID", "invalid-uuid");
-        cache.set("url", BluezCommons.DBUSB_PROTOCOL_NAME 
-            + "://XX:XX:XX:XX:XX:XX/YY:YY:YY:YY:YY:YY/0000180f-0000-1000-8000-00805f9b34fb/00002a19-0000-1000-8000-00805f9b34fb");
 
         setupHandlers();
         updateURL();
@@ -137,7 +104,7 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
         // this is the remote part of getURL
         try {
             String servicePath = getServicePath();
-            BluezService service = new BluezService(context, servicePath);
+            AbstractBluezService service = new NativeBluezService(context, servicePath);
             URL url = service.getURL().copyWithCharacteristic(getUUID());
             cache.set("url", url.toString());
         } catch (BluezException e) {
@@ -145,11 +112,7 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
         }
     }
 
-    public String getServicePath() {
-        // local part only
-        return BluezCommons.parsePath(dbusObjectPath, BluezService.class);
-    }
-
+    @Override
     protected void disposeRemote() {
         // remote part
         if (!allowRemoteCalls) {
@@ -166,40 +129,6 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
         disableValueNotifications();
     }
 
-    public static void dispose(BluezCharacteristic obj, boolean doRemoteCalls, boolean recurse) {
-        logger.debug("{}:{} Disposing characteristic", obj.dbusObjectPath, obj.getURL().getCharacteristicUUID());
-        BluezObjectBase.dispose(obj, doRemoteCalls, recurse);
-    }
-
-    private static Set<CharacteristicAccessType> parseFlags(Collection<String> flags) {
-        // the very first properties are known:
-        // https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.attribute.gatt.characteristico_declaration.xml
-        // the rest them to be clarified
-        //TODO find out what are they, extended properties (CharacteristicAccessType.EXTENDED_PROPERTIES)?
-        /*
-        "broadcast"
-        "read"
-        "write-without-response"
-        "write"
-        "notify"
-        "indicate"
-        "authenticated-signed-writes"
-
-        "reliable-write"
-        "writable-auxiliaries"
-        "encrypt-read"
-        "encrypt-write"
-        "encrypt-authenticated-read"
-        "encrypt-authenticated-write"
-        "secure-read" (Server only)
-        "secure-write" (Server only)
-         */
-        return flags.stream()
-            .map(flag -> AccessTypeMapping.valueOf(flag.toLowerCase().replaceAll("-", "_")).getAccessType())
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
-    }
-
     private void getFlagsRemote() {
         // remote - update cache
         // property - no action if read fails
@@ -213,7 +142,7 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
         // call remote part
         getFlagsRemote();
         // local part 
-        return parseFlags(cache.<Vector<String>>get("Flags"));
+        return super.getFlags();
     }
 
     private void isNotifyingRemote() {
@@ -227,7 +156,7 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
         // call remote part
         isNotifyingRemote();
         // local part
-        return cache.<Boolean>get("Notifying");
+        return super.isNotifying();
     }
 
     private byte[] readValueRemote() throws BluezException, NotReadyException {
@@ -237,7 +166,6 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
         }
 
         final Map<String, Variant> options = new HashMap<String, Variant>();
-
         try {
             return this.<byte[]>callWithDispose(
                 () -> { return (byte[])(remoteInterface.ReadValue(options)); },
@@ -298,9 +226,8 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
 
     @Override
     public void enableValueNotifications(Notification<byte[]> notification) throws BluezException {
-        getLogger().trace("{}: Enable value notifications", dbusObjectPath);
+        super.enableValueNotifications(notification);
         enableValueNotificationsRemote();
-        notificationData = notification;
     }
 
     private void disableValueNotificationsRemote() throws BluezException {
@@ -321,8 +248,7 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
 
     @Override
     public void disableValueNotifications() throws BluezException {
-        getLogger().trace("{}: Disable value notifications", dbusObjectPath);
-        notificationData = null;
+        super.disableValueNotifications();
         disableValueNotificationsRemote();
     }
 
@@ -390,12 +316,13 @@ class BluezCharacteristic extends BluezObjectBase implements Characteristic {
         this.<String>attemptCachedPropertyUpdate("UUID");
     }
 
+    @Override
     public String getUUID() {
         // call remote part
         if (allowRemoteCalls) {
             getUUIDRemote();
         }   
         // local part
-        return this.cache.<String>get("UUID");
+        return super.getUUID();
     }   
 }

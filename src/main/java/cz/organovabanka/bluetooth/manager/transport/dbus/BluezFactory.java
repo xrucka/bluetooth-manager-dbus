@@ -58,6 +58,10 @@ import java.util.stream.Collectors;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezCharacteristic;
+//import cz.organovabanka.bluetooth.manager.transport.dbus.AbstractBluezService;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
 
@@ -153,31 +157,31 @@ public class BluezFactory implements BluetoothObjectFactory {
     public synchronized void probeAdd(String objpath, String iface, Map<String, Variant> vals) {
         if (isAdapter(objpath, iface)) {
             logger.debug("{}: discovered bluetooth adapter", objpath);
-            BluezAdapter adapter = context.getManagedAdapter(objpath, true);
+            AbstractBluezAdapter adapter = context.getManagedAdapter(objpath, true);
             adapter.getCache().update(vals);
             return;
         } else if (isDevice(objpath, iface)) {
             logger.debug("{}: discovered bluetooth device", objpath);
 
             // ensure adapter exists before device gets added
-            String adapterPath = BluezCommons.parsePath(objpath, BluezAdapter.class);
-            BluezAdapter adapter = context.getManagedAdapter(adapterPath, true);
+            String adapterPath = BluezCommons.parsePath(objpath, Adapter.class);
+            AbstractBluezAdapter adapter = context.getManagedAdapter(adapterPath, true);
 
-            BluezDevice device = context.getManagedDevice(objpath);
+            AbstractBluezDevice device = context.getManagedDevice(objpath);
             device.getCache().update(vals);
             return;
         } else if (isCharacteristic(objpath, iface)) {
             logger.debug("{}: discovered bluetooth service characteristic", objpath);
 
             // ensure adapter & device exist before characteristic gets added
-            String devicePath = BluezCommons.parsePath(objpath, BluezDevice.class);
-            BluezDevice device = context.getManagedDevice(devicePath);
+            String devicePath = BluezCommons.parsePath(objpath, Device.class);
+            AbstractBluezDevice device = context.getManagedDevice(devicePath);
             if (device == null) {
                 // probe characteristic some time later
                 return;
             }
 
-            BluezCharacteristic characteristic = context.getManagedCharacteristic(objpath);
+            AbstractBluezCharacteristic characteristic = context.getManagedCharacteristic(objpath);
             characteristic.getCache().update(vals);
             return;
         }
@@ -253,7 +257,7 @@ public class BluezFactory implements BluetoothObjectFactory {
     }
 
     @Override
-    public BluezAdapter getAdapter(URL url) throws BluezException {
+    public AbstractBluezAdapter getAdapter(URL url) throws BluezException {
         try {
             return context.getManagedAdapter(url);
         } catch (NullPointerException e) {
@@ -263,7 +267,7 @@ public class BluezFactory implements BluetoothObjectFactory {
     }
 
     @Override
-    public BluezDevice getDevice(URL url) throws BluezException {
+    public AbstractBluezDevice getDevice(URL url) throws BluezException {
         try {
             return context.getManagedDevice(url);
         } catch (NullPointerException e) {
@@ -276,9 +280,9 @@ public class BluezFactory implements BluetoothObjectFactory {
     public Characteristic getCharacteristic(URL url) throws BluezException {
         try {
             // do not return characteristics for not-connected devices
-            BluezCharacteristic target = context.getManagedCharacteristic(url);
+            AbstractBluezCharacteristic target = context.getManagedCharacteristic(url);
             // get corresponding device
-            BluezDevice device = context.getManagedDevice(BluezCommons.parsePath(target.getPath(), BluezDevice.class), false);
+            AbstractBluezDevice device = context.getManagedDevice(BluezCommons.parsePath(target.getPath(), Device.class), false);
             return device.isConnected() ? target : null;
         } catch (NullPointerException e) {
             logger.debug("Unable to get characteristic by URL: {}, reason: {}", url, e.getMessage());
@@ -288,7 +292,7 @@ public class BluezFactory implements BluetoothObjectFactory {
 
     @Override
     public Set<DiscoveredAdapter> getDiscoveredAdapters() throws BluezException {
-        Collection<BluezAdapter> adapters = null;
+        Collection<AbstractBluezAdapter> adapters = null;
         synchronized (context) {
                 adapters = context.getManagedAdapters();
         }
@@ -305,8 +309,8 @@ public class BluezFactory implements BluetoothObjectFactory {
 
     @Override
     public Set<DiscoveredDevice> getDiscoveredDevices() throws BluezException {
-        Collection<BluezDevice> devices = null;
-        Collection<BluezAdapter> adapters = Collections.emptySet();
+        Collection<AbstractBluezDevice> devices = null;
+        Collection<AbstractBluezAdapter> adapters = Collections.emptySet();
 
         synchronized (context) {
             adapters = context.getManagedAdapters();
@@ -350,7 +354,7 @@ public class BluezFactory implements BluetoothObjectFactory {
     @Override
     public void dispose(URL url) {
         if (url.isAdapter()) {
-            BluezAdapter adapter = getAdapter(url);
+            AbstractBluezAdapter adapter = getAdapter(url);
             if (adapter == null) {
                 logger.debug("Requested disposal of allready disposed adapter under {}", url.toString());
                 return;
@@ -362,7 +366,7 @@ public class BluezFactory implements BluetoothObjectFactory {
             adapter.suspend(2);
     
         } else if (url.isDevice()) {
-            BluezDevice device = getDevice(url);
+            AbstractBluezDevice device = getDevice(url);
             if (device == null) {
                 logger.debug("Requested disposal of allready disposed device under {}", url.toString());
                 return;
@@ -374,7 +378,7 @@ public class BluezFactory implements BluetoothObjectFactory {
 
             if (!device.isPaired() && !device.isTrusted()) {
                 String adapterPath = device.getAdapterPath();
-                BluezAdapter adapter = context.getManagedAdapter(adapterPath);
+                AbstractBluezAdapter adapter = context.getManagedAdapter(adapterPath);
                 adapter.removeDevice(device.getPath());
             } else {
                 device.suspend(2);
@@ -383,13 +387,13 @@ public class BluezFactory implements BluetoothObjectFactory {
         }
     }
 
-    static void runSilently(Runnable func) {
+    public static void runSilently(Runnable func) {
         try {
             func.run();
         } catch (Exception ignore) { /* do nothing */ }
     }
 
-    static void notifySafely(Runnable noticator, Logger logger, String path) {
+    public static void notifySafely(Runnable noticator, Logger logger, String path) {
         getNotificationService().submit(() -> {
             try {
                 noticator.run();
@@ -413,7 +417,7 @@ public class BluezFactory implements BluetoothObjectFactory {
         } catch (Exception ignore) { /* do nothing */ }
     }
 
-    private static DiscoveredDevice convert(BluezDevice device) {
+    private static DiscoveredDevice convert(AbstractBluezDevice device) {
         return new DiscoveredDevice(
             device.getURL(),
             device.getName(), device.getAlias(),
@@ -422,7 +426,7 @@ public class BluezFactory implements BluetoothObjectFactory {
         );
     }
 
-    private static DiscoveredAdapter convert(BluezAdapter adapter) {
+    private static DiscoveredAdapter convert(AbstractBluezAdapter adapter) {
         return new DiscoveredAdapter(
             adapter.getURL(),
             adapter.getName(), adapter.getAlias()
