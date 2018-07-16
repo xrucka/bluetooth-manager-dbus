@@ -73,8 +73,6 @@ public class BluezContext {
     private Map<String, BluezDevice> devices = new ConcurrentHashMap();
     private Map<String, BluezCharacteristic> characteristics = new ConcurrentHashMap();
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(BluezContext.class);
-
     public BluezContext() throws BluezException {
         try {
             busConnection = DBusConnection.getConnection(DBusConnection.SYSTEM);
@@ -227,7 +225,7 @@ public class BluezContext {
         }
 
         if (!create) {
-            LOGGER.trace("{}: will not manage device", path);
+            logger.trace("{}: will not manage device", path);
             return null;
         }
 
@@ -236,7 +234,7 @@ public class BluezContext {
                 return devices.get(path);
             }
 
-            LOGGER.trace("{}: created handle for bluetooth device", path);
+            logger.trace("{}: created handle for bluetooth device", path);
             devices.putIfAbsent(path, new BluezDevice(this, path));
             return devices.get(path);
         }
@@ -301,7 +299,7 @@ public class BluezContext {
                 return characteristics.get(path);
             }
 
-            LOGGER.trace("{}: created handle for bluetooth characteristic", path);
+            logger.trace("{}: created handle for bluetooth characteristic", path);
             characteristics.putIfAbsent(path, new BluezCharacteristic(this, path));
             return characteristics.get(path);
         }
@@ -311,7 +309,7 @@ public class BluezContext {
 
         BluezDevice device = getManagedDevice(url);
         if (device == null) {
-            LOGGER.trace("Unable to access bluetooth service characteristic, as corresponding device is not managed: {}", url.toString());
+            logger.trace("Unable to access bluetooth service characteristic, as corresponding device is not managed: {}", url.toString());
             return null;
         }
 
@@ -328,7 +326,7 @@ public class BluezContext {
             }
         }
 
-        LOGGER.trace("Unable to access bluetooth service characteristic, as it is not managed: {}", url.toString());
+        logger.trace("Unable to access bluetooth service characteristic, as it is not managed: {}", url.toString());
 
         return null;
     }
