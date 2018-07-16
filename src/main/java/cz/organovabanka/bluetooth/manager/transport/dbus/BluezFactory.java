@@ -135,13 +135,28 @@ public class BluezFactory implements BluetoothObjectFactory {
         repopulationService.schedule(binder, 0, SECONDS);
     }
 
+    boolean isAdapter(String path, String iface) {
+        return path.equals(BluezCommons.parsePath(path, Adapter.class));
+        // iface.equals(BluezCommons.BLUEZ_IFACE_ADAPTER)
+    }
+
+    boolean isDevice(String path, String iface) {
+        return path.equals(BluezCommons.parsePath(path, Device.class));
+        // iface.equals(BluezCommons.BLUEZ_IFACE_DEVICE)
+    }
+
+    boolean isCharacteristic(String path, String iface) {
+        return path.equals(BluezCommons.parsePath(path, Characteristic.class));
+        // iface.equals(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC)
+    }
+
     public synchronized void probeAdd(String objpath, String iface, Map<String, Variant> vals) {
-        if (iface.equals(BluezCommons.BLUEZ_IFACE_ADAPTER)) {
+        if (isAdapter(objpath, iface)) {
             logger.debug("{}: discovered bluetooth adapter", objpath);
             BluezAdapter adapter = context.getManagedAdapter(objpath, true);
             adapter.getCache().update(vals);
             return;
-        } else if (iface.equals(BluezCommons.BLUEZ_IFACE_DEVICE)) {
+        } else if (isDevice(objpath, iface)) {
             logger.debug("{}: discovered bluetooth device", objpath);
 
             // ensure adapter exists before device gets added
@@ -151,7 +166,7 @@ public class BluezFactory implements BluetoothObjectFactory {
             BluezDevice device = context.getManagedDevice(objpath);
             device.getCache().update(vals);
             return;
-        } else if (iface.equals(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC)) {
+        } else if (isCharacteristic(objpath, iface)) {
             logger.debug("{}: discovered bluetooth service characteristic", objpath);
 
             // ensure adapter & device exist before characteristic gets added
