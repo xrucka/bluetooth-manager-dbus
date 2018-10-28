@@ -20,45 +20,39 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
  * #L%
  */
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezHooks;
+import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
+import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezObject;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacteristic;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
+
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusConnection;
-import org.freedesktop.dbus.DBusInterface;
-import org.freedesktop.dbus.DBusInterfaceName;
-import org.freedesktop.dbus.DBusMemberName;
 import org.freedesktop.dbus.DBusSigHandler;
-import org.freedesktop.dbus.DBusSignal;
-import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Struct;
-import org.freedesktop.dbus.Variant;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.sputnikdev.bluetooth.URL;
 
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
+import java.util.concurrent.ConcurrentNavigableMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.function.Supplier;
 
 /**
  * Context class for all Bluez related stuff
  * @author Lukas Rucka
  */
 public class BluezContext {
-    public final String buslock = "I don't really trust internal dbus-java locking, as I observed issues during development";
     private static final Logger logger = LoggerFactory.getLogger(BluezContext.class);
 
     private final DBusConnection busConnection;
@@ -68,10 +62,15 @@ public class BluezContext {
     private DBusSigHandler<ObjectManager.InterfacesRemoved> interfacesRemovedHandler = null;
     private DBusSigHandler<Properties.PropertiesChanged> propertiesChangedHandler = null;
 
-    // keep handlers for distinct object paths
-    private Map<String, BluezAdapter> adapters = new ConcurrentHashMap();
-    private Map<String, BluezDevice> devices = new ConcurrentHashMap();
-    private Map<String, BluezCharacteristic> characteristics = new ConcurrentHashMap();
+    // concurrent, nebo copy-on-write?
+    private Map<URL, BluezAdapter> adaptersByURL = new ConcurrentHashMap();
+    private Map<URL, BluezDevice> devicesByURL = new ConcurrentHashMap();
+    private Map<URL, BluezCharacteristic> characteristicsByURL = new ConcurrentHashMap();
+
+    private ConcurrentNavigableMap<String, URL> pathURLMappings = new ConcurrentSkipListMap();
+
+
+    private final BluezHooks hooks = new BluezHooks();
 
     public BluezContext() throws BluezException {
         try {
@@ -97,7 +96,7 @@ public class BluezContext {
         }
 
         try {
-            synchronized (buslock) {
+            synchronized (busConnection) {
                 DBus dbus = busConnection.getRemoteObject(BluezCommons.DBUS_DBUS_BUSNAME, BluezCommons.DBUS_DBUS_OBJECT, DBus.class);
                 String tmpBluezProcessOwner = dbus.GetNameOwner(BluezCommons.BLUEZ_DBUS_BUSNAME);
                 
@@ -123,7 +122,7 @@ public class BluezContext {
         }
 
         try {
-            synchronized (buslock) {
+            synchronized (busConnection) {
                 if (interfacesAddedHandler != null) {
                     busConnection.removeSigHandler(ObjectManager.InterfacesAdded.class, bluezProcessOwner, interfacesAddedHandler);
                 }
@@ -149,210 +148,217 @@ public class BluezContext {
         return busConnection;
     }
 
-    public BluezAdapter getManagedAdapter(String path) throws BluezException {
-        return getManagedAdapter(path, true);
+    public BluezAdapter getManagedAdapter(URL url) {
+        return adaptersByURL.get(url);
     }
 
-    public BluezAdapter getManagedAdapter(String path, boolean create) throws BluezException {
-        BluezAdapter adapter = adapters.get(path);
-        if (adapter != null) {
-            return adapter;
-        }
-
-        if (!create) {
-             //throw new BluezException("No such adapter managed: " + path);
-             return null;
-        }
-
-        synchronized (this) {
-            if (adapters.containsKey(path)) {
-                return adapters.get(path);
-            }
-
-            adapters.putIfAbsent(path, new BluezAdapter(this, path));
-            return adapters.get(path);
-        }
-    }
-
-    public BluezAdapter getManagedAdapter(URL url) throws BluezException {
-        // extremly ineffective :-/
-        for (BluezAdapter adapter : adapters.values()) {
-            if (url.getAdapterURL().equals(adapter.getURL())) {
-                return adapter;
-            }
-        }
-        
-        return null;
-    }
-
-    public Collection<BluezAdapter> getManagedAdapters() {
-        return adapters.values();
-    }
-
-    public synchronized void disposeAdapter(String path, boolean doRemoteCalls, boolean recurse) throws BluezException {
-        String pathExpr = path + "/";
-     
-        Set<String> subdevices = devices.keySet().stream()
-            .filter((devicePath) -> {
-                return devicePath.startsWith(pathExpr);
-            })
-            .collect(Collectors.toSet());
-
-        if (recurse) {
-            for (String devicePath : subdevices) {
-                disposeDevice(devicePath, doRemoteCalls, recurse);
-            }
-        }
-        
-        BluezAdapter adapter = adapters.get(path);
+    public void disposeAdapter(URL adapterURL) {
+        BluezAdapter adapter = adaptersByURL.get(adapterURL);
         if (adapter == null) {
             return;
         }
-
-        BluezAdapter.dispose(adapter, doRemoteCalls, recurse);
-        adapters.remove(path);
+    
+        adapter.dispose();
     }
 
-    public BluezDevice getManagedDevice(String path) throws BluezException {
-        return getManagedDevice(path, true);
-    }
-
-    public BluezDevice getManagedDevice(String path, boolean create) throws BluezException {
-        BluezDevice device = devices.get(path);
-
-        if (device != null) {
-            return device;
-        }
-
-        if (!create) {
-            logger.trace("{}: will not manage device", path);
-            return null;
-        }
-
-        synchronized (this) {
-            if (devices.containsKey(path)) {
-                return devices.get(path);
+    public BluezAdapter emplaceAdapter(URL url, Supplier<BluezAdapter> adapterConstructor) {
+        synchronized (adaptersByURL) {
+            BluezAdapter adapter = adaptersByURL.get(url);
+            if (adapter != null) {
+                return adapter;
             }
 
-            logger.trace("{}: created handle for bluetooth device", path);
-            devices.putIfAbsent(path, new BluezDevice(this, path));
-            return devices.get(path);
+            adapter = adapterConstructor.get();
+            adaptersByURL.put(url, adapter);
+            return adapter;
         }
     }
 
-    public BluezDevice getManagedDevice(URL url) throws BluezException {
-	// consider getting better url?
-        for (BluezDevice device : devices.values()) {
-            if (url.getDeviceURL().equals(device.getURL())) {
-                return device;
-            }
-        }
-        
-        return null;
+    public Collection<BluezAdapter> getManagedAdapters() {
+        return adaptersByURL.values();
     }
 
-    public Collection<BluezDevice> getManagedDevices() {
-        return devices.values();
-    }
+    public void dropAdapter(URL adapterURL) {
+        BluezAdapter adapter = adaptersByURL.get(adapterURL);
+        adaptersByURL.remove(adapterURL);
 
-    public synchronized void disposeDevice(String path, boolean doRemoteCalls, boolean recurse) throws BluezException {
-        String pathExpr = path + "/";
-     
-        Set<String> subcharacteristics = characteristics.keySet().stream()
-            .filter((characteristicPath) -> {
-                return characteristicPath.startsWith(pathExpr);
-            })
-            .collect(Collectors.toSet());
-
-        if (recurse) {
-            for (String characteristicPath : subcharacteristics) {
-                disposeCharacteristic(characteristicPath, doRemoteCalls, recurse);
-            }
-        }
-        
-        BluezDevice device = (devices.get(path));
-        if (device == null) {
+        if (!(adapter instanceof NativeBluezObject)) {
             return;
         }
 
-        BluezDevice.dispose(device, doRemoteCalls, recurse);
-        devices.remove(path);
-    }
+        NativeBluezObject dbusAdapter = (NativeBluezObject)adapter;
+        String dbuspath = dbusAdapter.getPath();
 
-    public BluezCharacteristic getManagedCharacteristic(String path) throws BluezException {
-        return getManagedCharacteristic(path, true);
-    }
-
-    public BluezCharacteristic getManagedCharacteristic(String path, boolean create) throws BluezException {
-        BluezCharacteristic characteristic = characteristics.get(path);
-        if (characteristic != null) {
-            return characteristic;
-        }
-
-        if (!create) {
-            //throw new BluezException("No such characteristic managed: " + path);
-            return null;
-        }
-
-        synchronized (this) {
-            if (characteristics.containsKey(path)) {
-                return characteristics.get(path);
-            }
-
-            logger.trace("{}: created handle for bluetooth characteristic", path);
-            characteristics.putIfAbsent(path, new BluezCharacteristic(this, path));
-            return characteristics.get(path);
-        }
-    }
-
-    public BluezCharacteristic getManagedCharacteristic(URL url) throws BluezException {
-
-        BluezDevice device = getManagedDevice(url);
-        if (device == null) {
-            logger.trace("Unable to access bluetooth service characteristic, as corresponding device is not managed: {}", url.toString());
-            return null;
-        }
-
-        String devicePath = device.getPath();
-
-        for (Map.Entry<String, BluezCharacteristic> entry : characteristics.entrySet()) {
-            if (!entry.getKey().startsWith(devicePath)) {
+        Set<String> paths = new HashSet<>();
+        Map<String, URL> keyEntry = pathURLMappings.subMap(dbuspath + ":", true, dbuspath + ";", false);
+        for (Map.Entry<String, URL> e : keyEntry.entrySet()) {
+            if (!e.getKey().startsWith(dbuspath + ":")) {
                 continue;
             }
 
-            BluezCharacteristic characteristic = entry.getValue();
-            if (characteristic.getUUID().equalsIgnoreCase(url.getCharacteristicUUID())) {
-                return characteristic;
+            if (!e.getValue().equals(adapterURL)) {
+                continue;
             }
+
+            paths.add(e.getKey());
         }
 
-        logger.trace("Unable to access bluetooth service characteristic, as it is not managed: {}", url.toString());
+        for (String key : paths) {
+            pathURLMappings.remove(key);
+        }
+    }    
 
-        return null;
+    public BluezDevice getManagedDevice(URL url) {
+        return devicesByURL.get(url);
     }
 
-    public synchronized void disposeCharacteristic(String path, boolean doRemoteCalls, boolean recurse) throws BluezException {
-        BluezCharacteristic characteristic = characteristics.get(path);
-        if (characteristic == null) {
+    public void disposeDevice(URL deviceURL) {
+        BluezDevice device = devicesByURL.get(deviceURL);
+        if (device == null) {
+            return;
+        }
+    
+        device.dispose();
+    }
+
+    public BluezDevice emplaceDevice(URL url, Supplier<BluezDevice> deviceConstructor) {
+        synchronized (devicesByURL) {
+            BluezDevice device = devicesByURL.get(url);
+            if (device != null) {
+                return device;
+            }
+
+            device = deviceConstructor.get();
+            devicesByURL.put(url, device);
+            return device;
+        }
+    }
+
+    public Collection<BluezDevice> getManagedDevices() {
+        return devicesByURL.values();
+    }
+
+    public void dropDevice(URL deviceURL) {
+        BluezDevice device = devicesByURL.get(deviceURL);
+        devicesByURL.remove(deviceURL);
+
+        if (!(device instanceof NativeBluezObject)) {
             return;
         }
 
-        BluezCharacteristic.dispose(characteristic, doRemoteCalls, recurse);
-        characteristics.remove(path);
-    }
+        NativeBluezObject dbusDevice = (NativeBluezObject)device;
+        String dbuspath = dbusDevice.getPath();
 
+        Set<String> paths = new HashSet<>();
+        Map<String, URL> keyEntry = pathURLMappings.subMap(dbuspath + ":", true, dbuspath + ";", false);
+        for (Map.Entry<String, URL> e : keyEntry.entrySet()) {
+            if (!e.getKey().startsWith(dbuspath + ":")) {
+                continue;
+            }
+
+            if (!e.getValue().equals(deviceURL)) {
+                continue;
+            }
+
+            paths.add(e.getKey());
+        }
+
+        for (String key : paths) {
+            pathURLMappings.remove(key);
+        }
+    }    
+
+    public BluezCharacteristic getManagedCharacteristic(URL url) {
+        return characteristicsByURL.get(url);
+    }
+    
+    public void disposeCharacteristic(URL characteristicURL) {
+        BluezCharacteristic characteristic = characteristicsByURL.get(characteristicURL);
+        if (characteristic == null) {
+            return;
+        }
+    
+        characteristic.dispose();
+    }
+  
+    public BluezCharacteristic emplaceCharacteristic(URL url, Supplier<BluezCharacteristic> characteristicConstructor) {
+        synchronized (characteristicsByURL) {
+            BluezCharacteristic characteristic = characteristicsByURL.get(url);
+            if (characteristic != null) {
+                return characteristic;
+            }
+
+            characteristic = characteristicConstructor.get();
+            characteristicsByURL.put(url, characteristic);
+            return characteristic;
+        }
+    }
+    
+    public void dropCharacteristic(URL characteristicURL) {
+        BluezCharacteristic characteristic = characteristicsByURL.get(characteristicURL);
+        characteristicsByURL.remove(characteristicURL);
+
+        if (!(characteristic instanceof NativeBluezObject)) {
+            return;
+        }
+
+        NativeBluezObject dbusCharacteristic = (NativeBluezObject)characteristic;
+        String dbuspath = dbusCharacteristic.getPath();
+
+        Set<String> paths = new HashSet<>();
+        Map<String, URL> keyEntry = pathURLMappings.subMap(dbuspath + ":", true, dbuspath + ";", false);
+        for (Map.Entry<String, URL> e : keyEntry.entrySet()) {
+            if (!e.getKey().startsWith(dbuspath + ":")) {
+                continue;
+            }
+
+            if (!e.getValue().equals(characteristicURL)) {
+                continue;
+            }
+
+            paths.add(e.getKey());
+        }
+
+        for (String key : paths) {
+            pathURLMappings.remove(key);
+        }
+    }    
 
     public synchronized void dispose() {
-        for (BluezDevice device : devices.values()) {
-            BluezDevice.dispose(device, true, true);
-        }
-        devices.clear();
-
-        for (BluezAdapter adapter : adapters.values()) {
-            BluezAdapter.dispose(adapter, true, true);
-        }
-        adapters.clear();
-
         unbind();
+
+        synchronized (characteristicsByURL) {
+            characteristicsByURL.values().stream()
+                .filter((characteristic) -> characteristic.isActive())
+                .forEach((characteristic) -> characteristic.dispose());
+            characteristicsByURL.clear();
+        }
+
+        synchronized (devicesByURL) {
+            devicesByURL.values().stream()
+                .filter((device) -> device.isActive())
+                .forEach((device) -> device.dispose());
+            devicesByURL.clear();
+        }
+
+        synchronized (adaptersByURL) {
+            adaptersByURL.values().stream()
+                .filter((adapter) -> adapter.isActive())
+                .forEach((adapter) -> adapter.dispose());
+            adaptersByURL.clear();
+        }
     } 
+
+    public BluezHooks getHooks() {
+        return hooks;
+    }
+
+    public URL pathURL(String iface, String path) {
+        return pathURLMappings.get(path + ":" + iface);
+    }
+
+    public URL pushPathURL(String iface, String path, URL url) {
+        return pathURLMappings.put(path + ":" + iface, url);
+    }
+
 }

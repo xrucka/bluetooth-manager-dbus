@@ -2,7 +2,7 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
 
 /*-
  * #%L
- * org.sputnikdev:bluetooth-manager-dbus
+ * cz.organovabanka:bluetooth-manager-dbus
  * %%
  * Copyright (C) 2018 Lukas Rucka
  * %%
@@ -20,33 +20,25 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
  * #L%
  */
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
+import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
+import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacteristic;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezService;
+
 import org.freedesktop.DBus;
-import org.freedesktop.DBus.Properties;
 import org.freedesktop.dbus.DBusConnection;
-import org.freedesktop.dbus.DBusInterface;
-import org.freedesktop.dbus.DBusInterfaceName;
-import org.freedesktop.dbus.DBusMemberName;
-import org.freedesktop.dbus.DBusSigHandler;
-import org.freedesktop.dbus.DBusSignal;
 import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Struct;
 import org.freedesktop.dbus.Variant;
 import org.freedesktop.dbus.exceptions.DBusException;
-import org.freedesktop.dbus.exceptions.DBusExecutionException;
-
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
 
-import java.lang.Byte;
 import java.lang.IllegalArgumentException;
-import java.lang.IllegalStateException;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -68,23 +60,23 @@ public class BluezCommons {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(BluezCommons.class);
 
-    static final Pattern makeAdapterPathPattern() {
+    public static final Pattern makeAdapterPathPattern() {
         return Pattern.compile("^" + BLUEZ_DBUS_OBJECT + "/hci[0-9]+$");
     }
 
-    static final Pattern makeDevicePathPattern(String adapterPath) {
+    public static final Pattern makeDevicePathPattern(String adapterPath) {
         return Pattern.compile("^" + adapterPath + "/dev(_[0-9a-fA-F]{2}){6}$");
     }
 
-    static final Pattern makeServicePathPattern(String devicePath) {
+    public static final Pattern makeServicePathPattern(String devicePath) {
         return Pattern.compile("^" + devicePath + "/service[0-9a-fA-F]{4}$");
     }
 
-    static final Pattern makeCharacteristicPathPattern(String servicePath) {
+    public static final Pattern makeCharacteristicPathPattern(String servicePath) {
         return Pattern.compile("^" + servicePath + "/char[0-9a-fA-F]{4}$");
     }
 
-    static final String parsePath(String objectPath, Class t) {
+    public static final String parsePath(String objectPath, Class t) {
         Class[] keys = { BluezAdapter.class, BluezDevice.class, BluezService.class, BluezCharacteristic.class, null };
         String[] patterns = {
             "^" + BLUEZ_DBUS_OBJECT + "/hci[0-9]+",
@@ -201,11 +193,7 @@ public class BluezCommons {
         return null;
     }
 
-    public static interface PropertyCache {
-        public void load(Map<String, Variant> values);
-    }
-
-    static <T> T readProperty(String iface, String property, Properties props, String objectPath) throws BluezException {
+    public static <T> T readProperty(String iface, String property, Properties props, String objectPath) throws BluezException {
         try {
             return (T)props.Get(iface, property);
         } catch (RuntimeException e) {
@@ -213,11 +201,19 @@ public class BluezCommons {
         }
     }
 
-    static <T> void writeProperty(String iface, String property, T value, Properties props, String objectPath) throws BluezException {
+    public static <T> void writeProperty(String iface, String property, T value, Properties props, String objectPath) throws BluezException {
         try {
             props.Set(iface, property, value);
         } catch (RuntimeException e) {
             throw new BluezException("Unable to write property " + objectPath + ":" + property + " of: " + e.toString(), e);
         }
     }
+
+    public static void runSilently(Runnable func) {
+        try {
+            func.run();
+        } catch (Exception ignore) { 
+            /* do nothing */
+        }
+    }   
 }

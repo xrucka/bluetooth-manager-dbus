@@ -2,7 +2,7 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
 
 /*-
  * #%L
- * org.sputnikdev:bluetooth-manager-dbus
+ * cz.organovabanka:bluetooth-manager-dbus
  * %%
  * Copyright (C) 2018 Lukas Rucka
  * %%
@@ -20,13 +20,13 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
  * #L%
  */
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
+
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusInterface;
 import org.freedesktop.dbus.DBusInterfaceName;
 import org.freedesktop.dbus.Path;
 import org.freedesktop.dbus.Variant;
-
-import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 
 import java.util.Map;
 

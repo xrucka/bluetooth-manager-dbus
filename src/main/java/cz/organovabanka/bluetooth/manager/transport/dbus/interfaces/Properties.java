@@ -2,7 +2,7 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
 
 /*-
  * #%L
- * org.sputnikdev:bluetooth-manager-dbus
+ * cz.organovabanka:bluetooth-manager-dbus
  * %%
  * Copyright (C) 2018 Lukas Rucka
  * %%
@@ -21,26 +21,15 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
  */
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusConnection;
 import org.freedesktop.dbus.DBusInterface;
 import org.freedesktop.dbus.DBusInterfaceName;
 import org.freedesktop.dbus.DBusMemberName;
-import org.freedesktop.dbus.DBusSigHandler;
 import org.freedesktop.dbus.DBusSignal;
-import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Struct;
 import org.freedesktop.dbus.Variant;
 import org.freedesktop.dbus.exceptions.DBusException;
-import org.freedesktop.dbus.exceptions.DBusExecutionException;
-
-import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Interface mirroring DBus properties interface methods.
@@ -49,14 +38,6 @@ import java.util.regex.Pattern;
  */
 @DBusInterfaceName("org.freedesktop.DBus.Properties")
 public interface Properties extends DBus.Properties {
-    public interface Cache {
-        public <T> void update(String name, T value);
-
-        public void update(Map<String, Variant> values);
-
-        public <T> T get(String name);
-    }
-
     @DBusMemberName("PropertiesChanged")
     public static class PropertiesChanged extends DBusSignal {
         private final String iface;

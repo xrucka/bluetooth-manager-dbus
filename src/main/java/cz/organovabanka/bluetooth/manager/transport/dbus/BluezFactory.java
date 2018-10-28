@@ -2,7 +2,7 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
 
 /*-
  * #%L
- * org.sputnikdev:bluetooth-manager-dbus
+ * cz.organovabanka:bluetooth-manager-dbus
  * %%
  * Copyright (C) 2018 Lukas Rucka
  * %%
@@ -20,20 +20,29 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
  * #L%
  */
 
+import static java.util.concurrent.TimeUnit.SECONDS;
+
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
+import cz.organovabanka.bluetooth.manager.transport.dbus.PropertiesChangedHandler;
+import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezCharacteristic;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezHooks;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezService;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacteristic;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.virtual.VirtualBatteryServiceHook;
+
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusConnection;
-import org.freedesktop.dbus.DBusInterface;
-import org.freedesktop.dbus.DBusInterfaceName;
-import org.freedesktop.dbus.DBusMemberName;
 import org.freedesktop.dbus.DBusSigHandler;
-import org.freedesktop.dbus.DBusSignal;
 import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Struct;
-import org.freedesktop.dbus.UInt32;
 import org.freedesktop.dbus.Variant;
 import org.freedesktop.dbus.exceptions.DBusException;
-import org.freedesktop.dbus.exceptions.DBusExecutionException;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
@@ -41,13 +50,9 @@ import org.sputnikdev.bluetooth.manager.DiscoveredAdapter;
 import org.sputnikdev.bluetooth.manager.DiscoveredDevice;
 import org.sputnikdev.bluetooth.manager.transport.Adapter;
 import org.sputnikdev.bluetooth.manager.transport.BluetoothObjectFactory;
-import org.sputnikdev.bluetooth.manager.transport.Characteristic;
 import org.sputnikdev.bluetooth.manager.transport.Device;
 
 import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -55,11 +60,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-
-import static java.util.concurrent.TimeUnit.SECONDS;
-
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
 
 /**
  * A Bluetooth Manager Transport abstraction layer implementation based on java dbus binding.
@@ -91,17 +91,57 @@ public class BluezFactory implements BluetoothObjectFactory {
 
             context.bind();
             populate();
-        };
+        }
     }
+
     private final Runnable binder = new Binder();
 
     private class Unbinder implements Runnable {
         public void run() {
             logger.error("Bluetooth daemon disappeared from system bus. Awaiting for new connection...");
             context.unbind();
-        };
+        }
     }
+
     private final Runnable unbinder = new Unbinder();
+
+    private URL makeAdapterURL(String adapterPath) {
+        adapterPath = BluezCommons.parsePath(adapterPath, BluezAdapter.class);
+        URL adapterURL = context.pathURL(BluezCommons.BLUEZ_IFACE_ADAPTER, adapterPath);
+
+        if (adapterURL == null) {
+            NativeBluezAdapter tmpAdapter = new NativeBluezAdapter(context, adapterPath);
+            adapterURL = tmpAdapter.getURL();
+        }
+
+        return adapterURL;
+    }
+
+    private URL makeDeviceURL(String devicePath) {
+        devicePath = BluezCommons.parsePath(devicePath, BluezDevice.class);
+        URL deviceURL = context.pathURL(BluezCommons.BLUEZ_IFACE_DEVICE, devicePath);
+
+        if (deviceURL == null) {
+            NativeBluezDevice tmpDevice = new NativeBluezDevice(context, devicePath, makeAdapterURL(devicePath));
+            deviceURL = tmpDevice.getURL();
+        }
+
+        return deviceURL;
+    }
+
+
+    public void probeAdd(String path, String dbusInterface, Map<String, Variant> values) {
+        if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_ADAPTER)) {
+            (new NativeBluezHooks.NativePostAdapterDiscovery()).probeAdd(context, path, values);
+        } else if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_DEVICE)) {
+            (new NativeBluezHooks.NativePostDeviceDiscovery()).probeAdd(context, makeAdapterURL(path), path, values);
+        } else if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC)) {
+            URL deviceURL = makeDeviceURL(path);
+            URL serviceURL = new NativeBluezService(context, path, deviceURL).getURL();
+            (new NativeBluezHooks.NativePostCharacteristicDiscovery()).probeAdd(context, serviceURL, path, values);
+        }
+        // no other handled
+    }
 
     private class AddedHandler implements DBusSigHandler<ObjectManager.InterfacesAdded> {
         public void handle(ObjectManager.InterfacesAdded s) {
@@ -115,88 +155,37 @@ public class BluezFactory implements BluetoothObjectFactory {
     private class RemovedHandler implements DBusSigHandler<ObjectManager.InterfacesRemoved> {
         public void handle(ObjectManager.InterfacesRemoved s) {
             String objpath = s.getObjectPath().toString();
-            
             if (BluezCommons.BLUEZ_DBUS_OBJECT.equals(objpath)) {
                 // bluez object disappeared - that means, the bluez daemon was restarted
                 repopulate();
                 return;
             }
 
-            for (String iface : s.getInterfacesRemoved()) {
-                probeDrop(objpath, iface);
+            synchronized (context) {
+                for (String iface : s.getInterfacesRemoved()) {
+                    URL targetURL = context.pathURL(iface, objpath);
+                    if (targetURL == null) {
+                        continue;
+                    }
+
+                    if (targetURL.isAdapter()) {
+                        context.dropAdapter(targetURL);
+                    } else if (targetURL.isDevice()) {
+                        context.dropDevice(targetURL);
+                    } else if (targetURL.isCharacteristic()) {
+                        context.dropCharacteristic(targetURL);
+                    }
+                }
             }
         }
     }
 
     public BluezFactory() throws BluezException {
         context = new BluezContext();
-
+        NativeBluezHooks.register(context);
+        VirtualBatteryServiceHook.register(context);
         context.setupHandlers(new AddedHandler(), new RemovedHandler(), new PropertiesChangedHandler(context));
         repopulationService.schedule(binder, 0, SECONDS);
-    }
-
-    boolean isAdapter(String path, String iface) {
-        return path.equals(BluezCommons.parsePath(path, Adapter.class));
-        // iface.equals(BluezCommons.BLUEZ_IFACE_ADAPTER)
-    }
-
-    boolean isDevice(String path, String iface) {
-        return path.equals(BluezCommons.parsePath(path, Device.class));
-        // iface.equals(BluezCommons.BLUEZ_IFACE_DEVICE)
-    }
-
-    boolean isCharacteristic(String path, String iface) {
-        return path.equals(BluezCommons.parsePath(path, Characteristic.class));
-        // iface.equals(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC)
-    }
-
-    public synchronized void probeAdd(String objpath, String iface, Map<String, Variant> vals) {
-        if (isAdapter(objpath, iface)) {
-            logger.debug("{}: discovered bluetooth adapter", objpath);
-            BluezAdapter adapter = context.getManagedAdapter(objpath, true);
-            adapter.getCache().update(vals);
-            return;
-        } else if (isDevice(objpath, iface)) {
-            logger.debug("{}: discovered bluetooth device", objpath);
-
-            // ensure adapter exists before device gets added
-            String adapterPath = BluezCommons.parsePath(objpath, BluezAdapter.class);
-            BluezAdapter adapter = context.getManagedAdapter(adapterPath, true);
-
-            BluezDevice device = context.getManagedDevice(objpath);
-            device.getCache().update(vals);
-            return;
-        } else if (isCharacteristic(objpath, iface)) {
-            logger.debug("{}: discovered bluetooth service characteristic", objpath);
-
-            // ensure adapter & device exist before characteristic gets added
-            String devicePath = BluezCommons.parsePath(objpath, BluezDevice.class);
-            BluezDevice device = context.getManagedDevice(devicePath);
-            if (device == null) {
-                // probe characteristic some time later
-                return;
-            }
-
-            BluezCharacteristic characteristic = context.getManagedCharacteristic(objpath);
-            characteristic.getCache().update(vals);
-            return;
-        }
-    }
-
-    public synchronized void probeDrop(String objpath, String iface) {
-        if (iface.equals(BluezCommons.BLUEZ_IFACE_ADAPTER)) {
-            logger.debug("{}: bluetooth adapter disappeared", objpath);
-            context.disposeAdapter(objpath, false, false);
-            return;
-        } else if (iface.equals(BluezCommons.BLUEZ_IFACE_DEVICE)) {
-            logger.debug("{}: bluetooth device disappeared", objpath);
-            context.disposeDevice(objpath, false, false);
-            return;
-        } else if (iface.equals(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC)) {
-            logger.debug("{}: bluetooth service characteristic disappeared", objpath);
-            context.disposeCharacteristic(objpath, false, false);
-            return;
-        }
     }
 
     void repopulate() {
@@ -210,26 +199,20 @@ public class BluezFactory implements BluetoothObjectFactory {
     }
 
     private void populate() {
-        Pattern adapterPattern = BluezCommons.makeAdapterPathPattern();
-        Pattern devicePattern = BluezCommons.makeDevicePathPattern(".*/hci[0-9a-fA-F]+");
         DBusConnection systemBus = context.getDbusConnection();
 
         ObjectManager objectManager = null;
 
         /* populate adapters */
         try {
-            synchronized (context.buslock) {
-                objectManager = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, "/", ObjectManager.class);
-            }
+            objectManager = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, "/", ObjectManager.class);
         } catch (DBusException e) {
             throw new BluezException("Unable to access dbus objects to enumerate bluetooth adapters", e);
         }
 
         Map<Path, Map<String, Map<String, Variant>>> allObjects = null;
         try {
-            synchronized (context.buslock) {
-                allObjects = objectManager.GetManagedObjects();
-            }
+            allObjects = objectManager.GetManagedObjects();
         } catch (RuntimeException ex) {
             throw new BluezException("Error populating adapters", ex);
         }
@@ -239,93 +222,92 @@ public class BluezFactory implements BluetoothObjectFactory {
         }
 
         // ensure adapters are populated before adding devices
+        Pattern adapterPattern = BluezCommons.makeAdapterPathPattern();
         allObjects.entrySet().stream()
-            .filter((entry) -> { return adapterPattern.matcher(entry.getKey().toString()).matches(); })
-            .forEach((entry) -> {
-                probeAdd(entry.getKey().toString(), BluezCommons.BLUEZ_IFACE_ADAPTER, entry.getValue().get(BluezCommons.BLUEZ_IFACE_ADAPTER));
-            });
+            .filter((entry) -> adapterPattern.matcher(entry.getKey().toString()).matches())
+            .forEach((entry) -> probeAdd(entry.getKey().toString(), BluezCommons.BLUEZ_IFACE_ADAPTER, entry.getValue().get(BluezCommons.BLUEZ_IFACE_ADAPTER)));
 
+        Pattern devicePattern = BluezCommons.makeDevicePathPattern(".*/hci[0-9a-fA-F]+");
         allObjects.entrySet().stream()
-            .filter((entry) -> { return devicePattern.matcher(entry.getKey().toString()).matches(); })
-            .forEach((entry) -> {
-                probeAdd(entry.getKey().toString(), BluezCommons.BLUEZ_IFACE_DEVICE, entry.getValue().get(BluezCommons.BLUEZ_IFACE_DEVICE));
-            });
+            .filter((entry) -> devicePattern.matcher(entry.getKey().toString()).matches())
+            .forEach((entry) -> probeAdd(entry.getKey().toString(), BluezCommons.BLUEZ_IFACE_DEVICE, entry.getValue().get(BluezCommons.BLUEZ_IFACE_DEVICE)));
     }
 
     @Override
-    public BluezAdapter getAdapter(URL url) throws BluezException {
-        try {
-            return context.getManagedAdapter(url);
-        } catch (NullPointerException e) {
-            logger.debug("Unable to get adapter by URL: {}, reason: {}", url, e);
+    public BluezAdapter getAdapter(URL url) {
+        BluezAdapter adapter = context.getManagedAdapter(url);
+        if (adapter == null) {
+            return null;
         }
-        return null;
+
+        adapter.activate();
+ 
+        return adapter;
     }
 
     @Override
-    public BluezDevice getDevice(URL url) throws BluezException {
-        try {
-            return context.getManagedDevice(url);
-        } catch (NullPointerException e) {
-            logger.debug("Unable to get device by URL: {}, reason: {}", url, e);
+    public BluezDevice getDevice(URL url) {
+        BluezDevice device = context.getManagedDevice(url);
+        if (device == null) {
+            return null;
         }
-        return null;
+        
+        device.activate();
+
+        return device;
     }
 
     @Override
-    public Characteristic getCharacteristic(URL url) throws BluezException {
-        try {
-            // do not return characteristics for not-connected devices
-            BluezCharacteristic target = context.getManagedCharacteristic(url);
-            // get corresponding device
-            BluezDevice device = context.getManagedDevice(BluezCommons.parsePath(target.getPath(), BluezDevice.class), false);
-            return device.isConnected() ? target : null;
-        } catch (NullPointerException e) {
-            logger.debug("Unable to get characteristic by URL: {}, reason: {}", url, e.getMessage());
+    public BluezCharacteristic getCharacteristic(URL url) {
+        BluezCharacteristic characteristic = context.getManagedCharacteristic(url);
+        if (characteristic == null) {
+            return null;
         }
-        return null;
+
+        characteristic.activate();
+
+        return characteristic;
     }
 
     @Override
-    public Set<DiscoveredAdapter> getDiscoveredAdapters() throws BluezException {
-        Collection<BluezAdapter> adapters = null;
-        synchronized (context) {
-                adapters = context.getManagedAdapters();
+    public Set<DiscoveredAdapter> getDiscoveredAdapters() {
+        Collection<BluezAdapter> _adapters = context.getManagedAdapters();
+
+        if (logger.isDebugEnabled()) {
+            String report = _adapters.stream()
+                .map((adapter) -> adapter.getURL().getAdapterAddress())
+                .collect(Collectors.joining(", "));
+            logger.debug("Discovered adapters: " + report);
         }
+
+        Set<DiscoveredAdapter> adapters = _adapters.stream()
+            .map((adapter) -> convert(adapter))
+            .collect(Collectors.toSet());
 
         if (adapters.isEmpty()) {
             // have no bluetooth adapters, perhaps bluez reset?
             repopulationService.schedule(binder, 15, SECONDS);
         }
 
-        return adapters.stream()
-            .map((adapter) -> convert(adapter))
-            .collect(Collectors.toSet());
+        return adapters;
     }
 
     @Override
-    public Set<DiscoveredDevice> getDiscoveredDevices() throws BluezException {
-        Collection<BluezDevice> devices = null;
-        Collection<BluezAdapter> adapters = Collections.emptySet();
+    public Set<DiscoveredDevice> getDiscoveredDevices() {
+        Collection<BluezDevice> _devices = context.getManagedDevices();
 
-        synchronized (context) {
-            adapters = context.getManagedAdapters();
+        if (logger.isDebugEnabled()) {
+            String report = _devices.stream()
+                .map((device) -> device.getURL().getDeviceAddress())
+                .collect(Collectors.joining(", "));
+            logger.debug("Discovered devices: " + report);
         }
 
-        adapters.stream()
-            .forEach((adapter) -> { adapter.getDevices(); });
-
-        synchronized (context) {
-            devices = context.getManagedDevices();
-        }
-
-        return devices.stream()
-            .map((device) -> { device.activate(); return device; })
-            .filter((device) -> { 
-                return device.isActive();
-            })
+        Set<DiscoveredDevice> devices = _devices.stream()
             .map((device) -> convert(device))
             .collect(Collectors.toSet());
+
+        return devices;
     }
 
     // done
@@ -349,47 +331,21 @@ public class BluezFactory implements BluetoothObjectFactory {
 
     @Override
     public void dispose(URL url) {
+        logger.debug("Dispose of {}", url.toString());
         if (url.isAdapter()) {
-            BluezAdapter adapter = getAdapter(url);
-            if (adapter == null) {
-                logger.debug("Requested disposal of allready disposed adapter under {}", url.toString());
-                return;
-            } 
-
-            //adapter.dispose(true, true);
-            //context.disposeAdapter(adapter.getPath(), true, true);
-            // dispose only removed objects, when dispose is called, deactivate device instead
-            adapter.suspend(2);
-    
+            context.disposeAdapter(url);
         } else if (url.isDevice()) {
-            BluezDevice device = getDevice(url);
-            if (device == null) {
-                logger.debug("Requested disposal of allready disposed device under {}", url.toString());
-                return;
-            }
-
-            //device.dispose(true, true);
-            //context.disposeDevice(device.getPath(), true, true);
-            // dispose only removed objects, when dispose is called, deactivate device instead
-
-            if (!device.isPaired() && !device.isTrusted()) {
-                String adapterPath = device.getAdapterPath();
-                BluezAdapter adapter = context.getManagedAdapter(adapterPath);
-                adapter.removeDevice(device.getPath());
-            } else {
-                device.suspend(2);
-            }
-
+            context.disposeDevice(url);
+        } else if (url.isCharacteristic()) {
+            context.disposeCharacteristic(url);
         }
     }
 
-    static void runSilently(Runnable func) {
-        try {
-            func.run();
-        } catch (Exception ignore) { /* do nothing */ }
+    public static void runSilently(Runnable func) {
+        BluezCommons.runSilently(func);
     }
 
-    static void notifySafely(Runnable noticator, Logger logger, String path) {
+    public static void notifySafely(Runnable noticator, Logger logger, String path) {
         getNotificationService().submit(() -> {
             try {
                 noticator.run();

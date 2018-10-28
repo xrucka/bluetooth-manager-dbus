@@ -2,7 +2,7 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
 
 /*-
  * #%L
- * org.sputnikdev:bluetooth-manager-dbus
+ * cz.organovabanka:bluetooth-manager-dbus
  * %%
  * Copyright (C) 2018 Lukas Rucka
  * %%
@@ -20,21 +20,31 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
  * #L%
  */
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezCharacteristic;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezDevice;
+import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezObject;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacteristic;
+import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
+
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusInterfaceName;
 import org.freedesktop.dbus.DBusSigHandler;
-
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.sputnikdev.bluetooth.URL;
 
 /**
- * DBus signal handler for cached properties update.
- * Upon invocation, it first updates the target object cache and then
- * invokes notification waiting upon target object.
+ * DBus signal handler for properties update.
+ * Upon invocation, fires notification waiting upon target object.
  * @author Lukas Rucka
  */
 @DBusInterfaceName("org.freedesktop.DBus.Properties")
 public class PropertiesChangedHandler implements DBusSigHandler<Properties.PropertiesChanged> {
     private final BluezContext context;
+    private final Logger logger = LoggerFactory.getLogger(PropertiesChangedHandler.class);
 
     public PropertiesChangedHandler(BluezContext context) {
         this.context = context;
@@ -42,26 +52,44 @@ public class PropertiesChangedHandler implements DBusSigHandler<Properties.Prope
 
     public void handle(Properties.PropertiesChanged signalled) {
         String objpath = signalled.getPath().toString();
-        BluezObjectBase target = null;
+        String iface = signalled.getIface();
 
+        URL targetURL = context.pathURL(iface, objpath);
+        if (targetURL == null) {
+            return;
+        }
+
+        NativeBluezObject target = null;
         //synchronized (context) {
-            if (objpath.equals(BluezCommons.parsePath(objpath, BluezAdapter.class))) {
-                target = context.getManagedAdapter(objpath, false);
-            } else if (objpath.equals(BluezCommons.parsePath(objpath, BluezDevice.class))) {
-                target = context.getManagedDevice(objpath, false);
-            } else if (objpath.equals(BluezCommons.parsePath(objpath, BluezCharacteristic.class))) {
-                target = context.getManagedCharacteristic(objpath, false);
+        if (targetURL.isAdapter()) {
+            BluezAdapter atarget = context.getManagedAdapter(targetURL);
+            if (atarget != null && ! (atarget instanceof NativeBluezObject)) {
+                logger.error("BUG: Some other object implementation in place of native bluez object");
+                return;
             }
-        //}
+            target = (NativeBluezObject)atarget;
+        } else if (targetURL.isDevice()) {
+            BluezDevice atarget = context.getManagedDevice(targetURL);
+            if (atarget != null && ! (atarget instanceof NativeBluezObject)) {
+                logger.error("BUG: Some other object implementation in place of native bluez object");
+                return;
+            }
+            target = (NativeBluezObject)atarget;
+        } else if (targetURL.isCharacteristic()) {
+            BluezCharacteristic atarget = context.getManagedCharacteristic(targetURL);
+            if (atarget != null && ! (atarget instanceof NativeBluezObject)) {
+                logger.error("BUG: Some other object implementation in place of native bluez object");
+                return;
+            }
+            target = (NativeBluezObject)atarget;
+        }
 
         if (target == null) { 
             return;
         }
 
         //synchronized (target) {
-            target.activateNow();
-            target.getCache().update(signalled.getPropertiesChanged());
-            target.commitNotifications(signalled.getPropertiesChanged());
+        target.commitNotifications(signalled.getPropertiesChanged());
         //}
     }
 }

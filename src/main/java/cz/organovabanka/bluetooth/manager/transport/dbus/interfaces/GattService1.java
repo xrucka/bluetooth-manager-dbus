@@ -22,19 +22,16 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
 
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 
-import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusInterface;
 import org.freedesktop.dbus.DBusInterfaceName;
 
+
 /**
- * Interface mirroring Bluez device interface methods.
+ * Interface mirroring Bluez gatt service interface methods.
  * @author Lukas Rucka
  */
-@DBusInterfaceName(BluezCommons.BLUEZ_IFACE_DEVICE)
-public interface Device1 extends DBusInterface {
-    void Disconnect();
-
-    void Connect();
+@DBusInterfaceName(BluezCommons.BLUEZ_IFACE_SERVICE)
+public interface GattService1 extends DBusInterface {
+	/* nothing to do here, just dummy placeholder */
 }
-
 

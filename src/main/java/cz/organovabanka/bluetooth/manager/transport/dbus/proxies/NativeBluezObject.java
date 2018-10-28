@@ -1,8 +1,8 @@
-package cz.organovabanka.bluetooth.manager.transport.dbus;
+package cz.organovabanka.bluetooth.manager.transport.dbus.proxies;
 
 /*-
  * #%L
- * org.sputnikdev:bluetooth-manager-dbus
+ * cz.organovabanka:bluetooth-manager-dbus
  * %%
  * Copyright (C) 2018 Lukas Rucka
  * %%
@@ -20,20 +20,17 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
  * #L%
  */
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
+import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
+
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusConnection;
-import org.freedesktop.dbus.DBusInterface;
-import org.freedesktop.dbus.DBusInterfaceName;
-import org.freedesktop.dbus.DBusMemberName;
-import org.freedesktop.dbus.DBusSigHandler;
-import org.freedesktop.dbus.DBusSignal;
-import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Struct;
 import org.freedesktop.dbus.Variant;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
 import org.freedesktop.dbus.exceptions.NotConnected;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.DataConversionUtils;
@@ -43,30 +40,19 @@ import org.sputnikdev.bluetooth.manager.transport.Characteristic;
 import org.sputnikdev.bluetooth.manager.transport.CharacteristicAccessType;
 import org.sputnikdev.bluetooth.manager.transport.Notification;
 
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
-
-import java.lang.Boolean;
-import java.lang.Class;
-import java.lang.Runnable;
-
-import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
-import java.util.regex.Pattern;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
- * A common component for all Bluez objects.
+ * A common component for all proxies Bluez objects.
  * @author Lukas Rucka
  */
-abstract class BluezObjectBase {
+public abstract class NativeBluezObject {
     // every method has remote + local part
     // order - first do remote, then local part
 
@@ -79,21 +65,16 @@ abstract class BluezObjectBase {
 
     protected final Map<String, Consumer<Variant>> handlers = new HashMap<String, Consumer<Variant>>();
 
-    protected final PropertyCache cache = new PropertyCache();
+    protected boolean active = false;
 
-    protected boolean allowRemoteCalls = true;
-    protected int inactive = 0;
-
-    protected BluezObjectBase(BluezContext context, String dbusObjectPath, String primaryInterface) throws BluezException {
+    protected NativeBluezObject(BluezContext context, String dbusObjectPath, String primaryInterface) throws BluezException {
         this.context = context;
         this.busConnection = context.getDbusConnection();
         this.dbusObjectPath = dbusObjectPath;
         this.primaryInterface = primaryInterface;
 
         try {
-            synchronized (context.buslock) {
-                this.objectProperties = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
-            }
+            this.objectProperties = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
         } catch (DBusException e) {
             throw new BluezException("Unable to access properties of " + dbusObjectPath + ": " + e.getMessage(), e);
         }
@@ -101,11 +82,11 @@ abstract class BluezObjectBase {
         activate();
     }
 
-    public Properties.Cache getCache() {
-        return cache;
-    } 
-
     public void commitNotifications(Map<String, Variant> changed) {
+        if (getLogger().isDebugEnabled()) {
+            String props = changed.keySet().stream().collect(Collectors.joining(", "));
+            getLogger().debug("Got updated properties of {} ({}) : {}", getPath(), getURL(), props);
+        }
         changed.entrySet().stream().forEach((entry) -> {
             Consumer<Variant> handler = handlers.get(entry.getKey());
             if (handler == null) {
@@ -116,47 +97,40 @@ abstract class BluezObjectBase {
         });
     }
 
-
-    public URL getURL() {
-        // this is the local part of getURL
-        return new URL(cache.<String>get("url"));
-    }
-
-    // this is the remote part of getURL
-    protected abstract void updateURL() throws BluezException;
+    public abstract URL getURL();
 
     protected abstract Logger getLogger();
 
-    protected <T> T readProperty(String iface, String property) throws DBusException {
-        Properties properties = objectProperties;
-        synchronized(busConnection) {
-            if (!primaryInterface.equals(iface)) {
-                properties = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
-            }
-            return (T)properties.Get(iface, property);
-        }
+    protected <T> T readProperty(String property) {
+        getLogger().trace("Reading property {}:{} of {} ({})", primaryInterface, property, getPath(), getURL());
+        return (T)objectProperties.Get(primaryInterface, property);
     }
 
-    protected <T> void writeProperty(String iface, String property, T value) throws DBusException {
-        Properties properties = objectProperties;
-        synchronized (context.buslock) {
+    protected <T> T readOptionalProperty(String property, Supplier<T> fallbackAction) {
+        try {
+            return readProperty(property);
+        } catch (DBusExecutionException ex) {
+            // perhaps checking for org.freedesktop.DBus.Error.InvalidArgs in getType() would be better
+            if (ex.getMessage().contains("No such property")) {
+                // do fallback
+            } else {
+                throw ex;
+            }
+        }
+
+        return fallbackAction.get();
+    }
+
+    protected <T> void writeProperty(String iface, String property, T value) throws NotReadyException {
+        getLogger().trace("Writing property {}:{}={} of {} ({})", iface, property, value.toString(), getPath(), getURL());
+        try {
+            Properties properties = objectProperties;
             if (!primaryInterface.equals(iface)) {
                 properties = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
             }
             properties.Set(iface, property, value);
-        }
-    }
-
-    protected <T> void attemptCachedPropertyUpdate(String property) {
-        attemptCachedPropertyUpdate(property, (v) -> { cache.update(property, v); });
-    }
-
-    protected <T> void attemptCachedPropertyUpdate(String property, Consumer<T> cacheSetter) {
-        try {
-            T value = this.<T>readProperty(primaryInterface, property);
-            cacheSetter.accept(value);
-        } catch (Exception e) {
-            getLogger().debug("{}:{} Error reading property, reason: {}", dbusObjectPath, property, e.getMessage());
+        } catch (DBusException ex) {
+            throw new NotReadyException(ex.toString());
         }
     }
 
@@ -169,54 +143,21 @@ abstract class BluezObjectBase {
         return primaryInterface;
     }
 
-    public void suspend(int ttl) {
-        inactive = -ttl;
-    }
-
     public void activate() {
-        if (inactive < 0) {
-            inactive++;
-        }
-    }
-
-    public void activateNow() {
-	inactive = 0;
+        active = true;
     }
 
     public boolean isActive() {
-        return inactive >= 0;
+        return active;
     }
 
-    protected abstract void disposeRemote();
-
-    protected abstract void disposeLocal(boolean doRemoteCalls, boolean recurse);
-    
-    protected void disposeLocalRemoteInterlink() {
-        // then destroy interconnects
+    public void dispose() {
+        active = false;
     }
 
-    protected void dispose(boolean doRemoteCalls, boolean recurse) {
-        suspend(1000);
-        getLogger().trace("{}: disposal requested", getPath());
-
-        // recurse is not used
-        if (doRemoteCalls && allowRemoteCalls) {
-            disposeRemote();
-        }
-
-        disposeLocal(doRemoteCalls && allowRemoteCalls, recurse);
-        disposeLocalRemoteInterlink();
-    }
-
-    public static void dispose(BluezObjectBase obj, boolean doRemoteCalls, boolean recurse) {
-        obj.dispose(doRemoteCalls, recurse);
-    }
-
-    protected <T> T callWithDispose(Callable<T> call, Runnable disposer) throws Exception, NotReadyException {
+    protected <T> T callWithCleanup(Callable<T> call, Runnable disposer) throws NotReadyException {
         try {
-            synchronized (context.buslock) {
-                return call.call();
-            }
+            return call.call();
         } catch (NotConnected cause) {
             throw new NotReadyException("Device is not connected " + getPath());
         } catch (DBusExecutionException cause) {
@@ -225,7 +166,7 @@ abstract class BluezObjectBase {
             } else if (cause.getMessage().matches("^.*[Nn]ot connected.*$")) {
                 throw new NotReadyException("Device is not connected " + getPath());
             } else {
-                throw cause;
+                throw new NotReadyException(cause.toString());
             }
         } catch (RuntimeException cause) {
             if (cause.getMessage().matches("^.*Method \".*\" with signature \".*\" on interface .*$")) {
@@ -235,15 +176,15 @@ abstract class BluezObjectBase {
             } else {
                 throw cause;
             }
+        } catch (Exception cause) {
+            throw new NotReadyException("Generic failure on " + getPath());
         }
         return null;
     }
 
-    protected void callWithDispose(Runnable call, Runnable disposer) throws NotReadyException {
+    protected void callWithCleanup(Runnable call, Runnable disposer) throws NotReadyException {
         try {
-            synchronized (context.buslock) {
-                call.run();
-            }
+            call.run();
         } catch (NotConnected cause) {
             throw new NotReadyException("Device is not connected " + getPath());
         } catch (DBusExecutionException cause) {
@@ -252,7 +193,7 @@ abstract class BluezObjectBase {
             } else if (cause.getMessage().matches("^.*[Nn]ot connected.*$")) {
                 throw new NotReadyException("Device is not connected " + getPath());
             } else {
-                throw cause;
+                throw new NotReadyException(cause.toString());
             }
         } catch (RuntimeException cause) {
             if (cause.getMessage().matches("^.*Method \".*\" with signature \".*\" on interface .*$")) {
@@ -260,7 +201,7 @@ abstract class BluezObjectBase {
             } else if (cause.getMessage().matches("^.*[Nn]ot connected.*$")) {
                 throw new NotReadyException("Device is not connected " + getPath());
             } else {
-                throw cause;
+                throw new NotReadyException(cause.toString());
             }
         }
     }

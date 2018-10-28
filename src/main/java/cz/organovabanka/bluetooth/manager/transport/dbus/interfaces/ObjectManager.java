@@ -2,7 +2,7 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
 
 /*-
  * #%L
- * org.sputnikdev:bluetooth-manager-dbus
+ * cz.organovabanka:bluetooth-manager-dbus
  * %%
  * Copyright (C) 2018 Lukas Rucka
  * %%
@@ -20,27 +20,19 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
  * #L%
  */
 
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
+
 import org.freedesktop.DBus;
-import org.freedesktop.DBus.Properties;
-import org.freedesktop.dbus.DBusConnection;
 import org.freedesktop.dbus.DBusInterface;
 import org.freedesktop.dbus.DBusInterfaceName;
 import org.freedesktop.dbus.DBusMemberName;
-import org.freedesktop.dbus.DBusSigHandler;
 import org.freedesktop.dbus.DBusSignal;
 import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Struct;
 import org.freedesktop.dbus.Variant;
-import org.freedesktop.dbus.exceptions.DBusExecutionException;
 import org.freedesktop.dbus.exceptions.DBusException;
-
-import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Interface mirroring DBus object manager interface methods, providing way to probe Bluez objects.
