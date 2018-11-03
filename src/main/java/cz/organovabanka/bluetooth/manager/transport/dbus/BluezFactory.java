@@ -26,7 +26,6 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
 import cz.organovabanka.bluetooth.manager.transport.dbus.PropertiesChangedHandler;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezAdapter;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezCharacteristic;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezDevice;
@@ -38,11 +37,14 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 import cz.organovabanka.bluetooth.manager.transport.dbus.virtual.VirtualBatteryServiceHook;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusConnection;
-import org.freedesktop.dbus.DBusSigHandler;
-import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Variant;
+import org.freedesktop.dbus.DBusPath;
+import org.freedesktop.dbus.handlers.AbstractInterfacesAddedHandler;
+import org.freedesktop.dbus.handlers.AbstractInterfacesRemovedHandler;
+import org.freedesktop.dbus.interfaces.DBusSigHandler;
+import org.freedesktop.dbus.interfaces.ObjectManager;
 import org.freedesktop.dbus.exceptions.DBusException;
+import org.freedesktop.dbus.exceptions.NotConnected;
+import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
@@ -55,9 +57,9 @@ import org.sputnikdev.bluetooth.manager.transport.Device;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -68,9 +70,7 @@ import java.util.stream.Collectors;
 public class BluezFactory implements BluetoothObjectFactory {
     private static final Logger logger = LoggerFactory.getLogger(BluezFactory.class);
 
-    private static final ExecutorService NOTIFICATION_SERVICE = Executors.newCachedThreadPool();
-    private static final ScheduledExecutorService repopulationService = Executors.newScheduledThreadPool(1);
-
+    private final ScheduledExecutorService repopulationService = Executors.newScheduledThreadPool(1);
     private final BluezContext context;
 
     private class Binder implements Runnable {
@@ -79,11 +79,19 @@ public class BluezFactory implements BluetoothObjectFactory {
                 DBus dbus = context.getDbusConnection().getRemoteObject(BluezCommons.DBUS_DBUS_BUSNAME, BluezCommons.DBUS_DBUS_OBJECT, DBus.class);
                 if (!dbus.NameHasOwner(BluezCommons.BLUEZ_DBUS_BUSNAME)) {
                     // have not found bluez daemon, reschedule
-                    repopulationService.schedule(this, 15, SECONDS);
+                    schedule(this, 15, SECONDS);
                 }
+/*
+            } catch (NotConnected e) {
+                logger.error("Disconnected dbus detected!");
+                context.getDbusConnection().disconnect();
+                context.connect();
+                context.reset();
+                context.setupHandlers(new AddedHandler(), new RemovedHandler(), new PropertiesChangedHandler(context));
+*/
             } catch (DBusException e) {
                 logger.error("Cannot check bluetooth daemon: {}", e.getMessage());
-                repopulationService.schedule(this, 15, SECONDS);
+                schedule(this, 15, SECONDS);
                 return;
             }
 
@@ -104,6 +112,11 @@ public class BluezFactory implements BluetoothObjectFactory {
     }
 
     private final Runnable unbinder = new Unbinder();
+
+    private void schedule(Runnable that, long time, TimeUnit tu) {
+        repopulationService.schedule(that, time, tu);
+    }
+
 
     private URL makeAdapterURL(String adapterPath) {
         adapterPath = BluezCommons.parsePath(adapterPath, BluezAdapter.class);
@@ -130,12 +143,13 @@ public class BluezFactory implements BluetoothObjectFactory {
     }
 
 
-    public void probeAdd(String path, String dbusInterface, Map<String, Variant> values) {
-        if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_ADAPTER)) {
+    public void probeAdd(String path, String dbusInterface, Map<String, Variant<?>> values) {
+        // dbus-java 3.0.0 fires interfaces added even on root paths, not only correct paths; ignore the missfires by checking path
+        if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_ADAPTER) && path.equals(BluezCommons.parsePath(path, BluezAdapter.class))) {
             (new NativeBluezHooks.NativePostAdapterDiscovery()).probeAdd(context, path, values);
-        } else if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_DEVICE)) {
+        } else if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_DEVICE) && path.equals(BluezCommons.parsePath(path, BluezDevice.class))) {
             (new NativeBluezHooks.NativePostDeviceDiscovery()).probeAdd(context, makeAdapterURL(path), path, values);
-        } else if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC)) {
+        } else if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC) && path.equals(BluezCommons.parsePath(path, BluezCharacteristic.class))) {
             URL deviceURL = makeDeviceURL(path);
             URL serviceURL = new NativeBluezService(context, path, deviceURL).getURL();
             (new NativeBluezHooks.NativePostCharacteristicDiscovery()).probeAdd(context, serviceURL, path, values);
@@ -143,16 +157,16 @@ public class BluezFactory implements BluetoothObjectFactory {
         // no other handled
     }
 
-    private class AddedHandler implements DBusSigHandler<ObjectManager.InterfacesAdded> {
+    private class AddedHandler extends AbstractInterfacesAddedHandler {
         public void handle(ObjectManager.InterfacesAdded s) {
             String objpath = s.getObjectPath().toString();
-            for (Map.Entry<String, Map<String, Variant>> pathEntry : s.getInterfacesAdded().entrySet()) {
+            for (Map.Entry<String, Map<String, Variant<?>>> pathEntry : s.getInterfaces().entrySet()) {
                 probeAdd(objpath, pathEntry.getKey(), pathEntry.getValue());
             }
         }
     }
 
-    private class RemovedHandler implements DBusSigHandler<ObjectManager.InterfacesRemoved> {
+    private class RemovedHandler extends AbstractInterfacesRemovedHandler {
         public void handle(ObjectManager.InterfacesRemoved s) {
             String objpath = s.getObjectPath().toString();
             if (BluezCommons.BLUEZ_DBUS_OBJECT.equals(objpath)) {
@@ -162,7 +176,7 @@ public class BluezFactory implements BluetoothObjectFactory {
             }
 
             synchronized (context) {
-                for (String iface : s.getInterfacesRemoved()) {
+                for (String iface : s.getInterfaces()) {
                     URL targetURL = context.pathURL(iface, objpath);
                     if (targetURL == null) {
                         continue;
@@ -185,22 +199,20 @@ public class BluezFactory implements BluetoothObjectFactory {
         NativeBluezHooks.register(context);
         VirtualBatteryServiceHook.register(context);
         context.setupHandlers(new AddedHandler(), new RemovedHandler(), new PropertiesChangedHandler(context));
-        repopulationService.schedule(binder, 0, SECONDS);
+        schedule(binder, 0, SECONDS);
     }
 
     void repopulate() {
         // ok, we will need futures for:
 
         // shuting down 
-        repopulationService.schedule(unbinder, 1, SECONDS);
+        schedule(unbinder, 1, SECONDS);
 
         // repopulation
-        repopulationService.schedule(binder, 6, SECONDS);
+        schedule(binder, 6, SECONDS);
     }
 
     private void populate() {
-        DBusConnection systemBus = context.getDbusConnection();
-
         ObjectManager objectManager = null;
 
         /* populate adapters */
@@ -210,7 +222,7 @@ public class BluezFactory implements BluetoothObjectFactory {
             throw new BluezException("Unable to access dbus objects to enumerate bluetooth adapters", e);
         }
 
-        Map<Path, Map<String, Map<String, Variant>>> allObjects = null;
+        Map<DBusPath, Map<String, Map<String, Variant<?>>>> allObjects = null;
         try {
             allObjects = objectManager.GetManagedObjects();
         } catch (RuntimeException ex) {
@@ -230,6 +242,7 @@ public class BluezFactory implements BluetoothObjectFactory {
         Pattern devicePattern = BluezCommons.makeDevicePathPattern(".*/hci[0-9a-fA-F]+");
         allObjects.entrySet().stream()
             .filter((entry) -> devicePattern.matcher(entry.getKey().toString()).matches())
+            //.forEach((entry) -> logger.error("Matched device {} {}", entry.getKey().toString(), devicePattern.matcher(entry.getKey().toString()).matches()));
             .forEach((entry) -> probeAdd(entry.getKey().toString(), BluezCommons.BLUEZ_IFACE_DEVICE, entry.getValue().get(BluezCommons.BLUEZ_IFACE_DEVICE)));
     }
 
@@ -286,7 +299,10 @@ public class BluezFactory implements BluetoothObjectFactory {
 
         if (adapters.isEmpty()) {
             // have no bluetooth adapters, perhaps bluez reset?
-            repopulationService.schedule(binder, 15, SECONDS);
+            schedule(binder, 15, SECONDS);
+        } else {
+            // todo tripple the interval
+            schedule(binder, 15, SECONDS);
         }
 
         return adapters;
@@ -325,6 +341,14 @@ public class BluezFactory implements BluetoothObjectFactory {
      */
     public void dispose() {
         logger.debug("BluezFactory: general dispose");
+
+        repopulationService.shutdown();
+        try {
+            repopulationService.awaitTermination(30, SECONDS);
+        } catch (InterruptedException e) {
+            ; // silently ignore
+        }
+
         context.unbind();
         context.dispose();
     }
@@ -343,23 +367,6 @@ public class BluezFactory implements BluetoothObjectFactory {
 
     public static void runSilently(Runnable func) {
         BluezCommons.runSilently(func);
-    }
-
-    public static void notifySafely(Runnable noticator, Logger logger, String path) {
-        getNotificationService().submit(() -> {
-            try {
-                noticator.run();
-            } catch (RuntimeException e) {
-                logger.error("Notification on " + path + " error: " + e.toString() + " " + e.getCause().toString());
-            } catch (Exception e) {
-                logger.error("Notification on " + path + " error: " + e.toString() + " " + e.getCause().toString());
-            }
-        });
-    }
-
-    // done
-    private static ExecutorService getNotificationService() {
-        return NOTIFICATION_SERVICE;
     }
 
     // done

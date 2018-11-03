@@ -20,7 +20,7 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
  * #L%
  */
 
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
+import org.freedesktop.dbus.interfaces.Properties;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezAdapter;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezCharacteristic;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezDevice;
@@ -30,8 +30,9 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacte
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusInterfaceName;
-import org.freedesktop.dbus.DBusSigHandler;
+import org.freedesktop.dbus.annotations.DBusInterfaceName;
+import org.freedesktop.dbus.handlers.AbstractPropertiesChangedHandler;
+import org.freedesktop.dbus.interfaces.DBusSigHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
@@ -42,7 +43,7 @@ import org.sputnikdev.bluetooth.URL;
  * @author Lukas Rucka
  */
 @DBusInterfaceName("org.freedesktop.DBus.Properties")
-public class PropertiesChangedHandler implements DBusSigHandler<Properties.PropertiesChanged> {
+public class PropertiesChangedHandler extends AbstractPropertiesChangedHandler {
     private final BluezContext context;
     private final Logger logger = LoggerFactory.getLogger(PropertiesChangedHandler.class);
 
@@ -52,7 +53,7 @@ public class PropertiesChangedHandler implements DBusSigHandler<Properties.Prope
 
     public void handle(Properties.PropertiesChanged signalled) {
         String objpath = signalled.getPath().toString();
-        String iface = signalled.getIface();
+        String iface = signalled.getInterfaceName();
 
         URL targetURL = context.pathURL(iface, objpath);
         if (targetURL == null) {

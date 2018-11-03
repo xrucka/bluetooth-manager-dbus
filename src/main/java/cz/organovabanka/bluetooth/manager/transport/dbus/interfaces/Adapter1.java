@@ -23,10 +23,10 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusInterface;
-import org.freedesktop.dbus.DBusInterfaceName;
-import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Variant;
+import org.freedesktop.dbus.DBusPath;
+import org.freedesktop.dbus.annotations.DBusInterfaceName;
+import org.freedesktop.dbus.interfaces.DBusInterface;
+import org.freedesktop.dbus.types.Variant;
 
 import java.util.Map;
 
@@ -42,5 +42,5 @@ public interface Adapter1 extends DBusInterface {
 
     void SetDiscoveryFilter(Map<String, Variant> properties);
 
-    void RemoveDevice(Path device);
+    void RemoveDevice(DBusPath device);
 }

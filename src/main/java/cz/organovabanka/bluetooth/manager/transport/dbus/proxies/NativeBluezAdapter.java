@@ -26,16 +26,16 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezFactory;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezHooks;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Adapter1;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezObject;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezAdapter;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.UInt32;
-import org.freedesktop.dbus.Variant;
+import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
+import org.freedesktop.dbus.interfaces.ObjectManager;
+import org.freedesktop.dbus.types.UInt32;
+import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
@@ -64,9 +64,10 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
 
     public NativeBluezAdapter(BluezContext context, String dbusObjectPath) throws BluezException {
         super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_ADAPTER);
+        logger.error("Creating adapter for {}", dbusObjectPath);
 
         try {
-            this.remoteInterface = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Adapter1.class);
+            this.remoteInterface = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Adapter1.class);
         } catch (DBusException e) {
             throw new BluezException("Unable to access dbus objects for " + dbusObjectPath, e); 
         }
@@ -81,7 +82,7 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
                 return;
             }
 
-            BluezFactory.notifySafely(() -> {
+            context.notifySafely(() -> {
                 notificationPowered.notify( (Boolean)(powered.getValue()) );
             }, logger, dbusObjectPath + ":Powered");
         });
@@ -90,7 +91,7 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
                 return;
             }
 
-            BluezFactory.notifySafely(() -> {
+            context.notifySafely(() -> {
                 notificationDiscovering.notify((Boolean)discovering.getValue());
             }, logger, dbusObjectPath + ":Discovering");
         });
@@ -115,7 +116,7 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
 
     @Override
     public boolean stopDiscovery() {
-	getLogger().trace("Invoking {}() of {} ({})", "stopDiscovery", getPath(), getURL());
+        getLogger().trace("Invoking {}() of {} ({})", "stopDiscovery", getPath(), getURL());
         callWithCleanup(
             () -> { remoteInterface.StopDiscovery(); },
             () -> { context.dropAdapter(getURL()); }
@@ -127,7 +128,7 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
     public boolean startDiscovery() {
         Map<String, Variant> filterOptions = new HashMap<String, Variant>();
         filterOptions.put("RSSI", new Variant<Short>(new Short((short)-100), "n"));
-	getLogger().trace("Invoking {}() of {} ({})", "startDiscovery", getPath(), getURL());
+        getLogger().trace("Invoking {}() of {} ({})", "startDiscovery", getPath(), getURL());
 
         callWithCleanup(
             () -> { remoteInterface.SetDiscoveryFilter(filterOptions); },
@@ -143,8 +144,8 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
     }  
  
     public void removeDevice(String devicePath) {
-	getLogger().trace("Invoking {}() of {} ({})", "removeDevice", getPath(), getURL());
-        remoteInterface.RemoveDevice(new Path(devicePath));
+        getLogger().trace("Invoking {}() of {} ({})", "removeDevice", getPath(), getURL());
+        remoteInterface.RemoveDevice(new DBusPath(devicePath));
     }
 
     /* notification setters */
@@ -184,6 +185,8 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
 
     @Override
     public void dispose() {
+        // tinyb stopne discovery, disposne rekurzivne vsechna zarizeni pod adapterem a nakonec zrusi notifikace
+
         this.disableDiscoveringNotifications();
         this.disablePoweredNotifications();
 

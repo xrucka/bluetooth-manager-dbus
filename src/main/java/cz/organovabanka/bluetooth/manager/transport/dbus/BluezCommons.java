@@ -21,23 +21,21 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
  */
 
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezAdapter;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacteristic;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezService;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusConnection;
-import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Variant;
+import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
+import org.freedesktop.dbus.interfaces.ObjectManager;
+import org.freedesktop.dbus.interfaces.Properties;
+import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
 
-import java.lang.IllegalArgumentException;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -58,7 +56,7 @@ public class BluezCommons {
     public static final String DBUS_DBUS_OBJECT = "/org/freedesktop/DBus";
     public static final String DBUSB_PROTOCOL_NAME = "bluez";
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(BluezCommons.class);
+    private static final Logger logger = LoggerFactory.getLogger(BluezCommons.class);
 
     public static final Pattern makeAdapterPathPattern() {
         return Pattern.compile("^" + BLUEZ_DBUS_OBJECT + "/hci[0-9]+$");
@@ -99,24 +97,24 @@ public class BluezCommons {
     }
 
     private static String matchBluezObject(
-        Map<Path, Map<String, Map<String, Variant>>> allObjects, 
+        Map<DBusPath, Map<String, Map<String, Variant<?>>>> allObjects, 
         Pattern pattern, 
         String iface, 
         String key, 
         String value
     ) {
         if (allObjects == null) {
-            LOGGER.error("Bluez subsystem not available");
+            logger.error("Bluez subsystem not available");
             return null;
         }
 
-        for (Map.Entry<Path, Map<String, Map<String, Variant>>> entry : allObjects.entrySet()) {
+        for (Map.Entry<DBusPath, Map<String, Map<String, Variant<?>>>> entry : allObjects.entrySet()) {
             String path = entry.getKey().toString();
             if (!pattern.matcher(path).matches()) {
                 continue;
             }
 
-            Map<String, Map<String, Variant>> details = entry.getValue();
+            Map<String, Map<String, Variant<?>>> details = entry.getValue();
             String keyval = details.get(iface).get(key).getValue().toString();
 
             if (keyval.toLowerCase() == value.toLowerCase()) {
@@ -139,9 +137,9 @@ public class BluezCommons {
             throw new BluezException("Unable to access dbus base services on bus " + BluezCommons.BLUEZ_DBUS_BUSNAME, e);
         }
 
-        Map<Path, Map<String, Map<String, Variant>>> allObjects = objectManager.GetManagedObjects();
+        Map<DBusPath, Map<String, Map<String, Variant<?>>>> allObjects = objectManager.GetManagedObjects();
         if (allObjects == null) {
-            LOGGER.error("Bluez subsystem not available");
+            logger.error("Bluez subsystem not available");
             return null;
         }
 
@@ -153,7 +151,7 @@ public class BluezCommons {
             return adapterPath;
         }
         if (adapterPath == null) {
-            LOGGER.debug("Inexistent adapter requested (" + adapterMac + ")");
+            logger.debug("Inexistent adapter requested (" + adapterMac + ")");
             return null;
         }
 
@@ -165,7 +163,7 @@ public class BluezCommons {
             return devicePath;
         }
         if (devicePath == null) {
-            LOGGER.debug("Device not found under such adapter (" + deviceMac + ")");
+            logger.debug("Device not found under such adapter (" + deviceMac + ")");
             return null;
         }
 
@@ -177,7 +175,7 @@ public class BluezCommons {
             return servicePath;
         }
         if (servicePath == null) {
-            LOGGER.debug("Service not found under such device (service " + serviceUuid + ")");
+            logger.debug("Service not found under such device (service " + serviceUuid + ")");
             return null;
         }
 
@@ -189,7 +187,7 @@ public class BluezCommons {
             return characteristicPath;
         }
 
-        LOGGER.trace("Characteristic not found under service (characteristic " + characteristicUuid + ")");
+        logger.trace("Characteristic not found under service (characteristic " + characteristicUuid + ")");
         return null;
     }
 

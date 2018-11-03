@@ -24,7 +24,6 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezHooks;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezDevice;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezObject;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacteristic;
@@ -32,10 +31,12 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezService;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusInterface;
-import org.freedesktop.dbus.DBusInterfaceName;
+import org.freedesktop.dbus.annotations.DBusInterfaceName;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
+import org.freedesktop.dbus.interfaces.DBusInterface;
+import org.freedesktop.dbus.interfaces.Introspectable;
+import org.freedesktop.dbus.interfaces.ObjectManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
@@ -204,7 +205,7 @@ public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscover
     private boolean hasBatteryService(BluezContext context, NativeBluezDevice device) {
         String probed = null;
         try {
-            DBus.Introspectable probe = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, device.getPath(), DBus.Introspectable.class);
+            Introspectable probe = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, device.getPath(), Introspectable.class);
             probed = probe.Introspect();
         } catch (DBusExecutionException | DBusException ex) {
             return false;

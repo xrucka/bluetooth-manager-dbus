@@ -23,14 +23,13 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.proxies;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusConnection;
-import org.freedesktop.dbus.Variant;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
 import org.freedesktop.dbus.exceptions.NotConnected;
+import org.freedesktop.dbus.interfaces.Properties;
+import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.DataConversionUtils;
@@ -57,24 +56,22 @@ public abstract class NativeBluezObject {
     // order - first do remote, then local part
 
     protected final BluezContext context;
-    protected final DBusConnection busConnection;
 
     protected final String dbusObjectPath;
     protected final String primaryInterface;
     protected final Properties objectProperties;
 
-    protected final Map<String, Consumer<Variant>> handlers = new HashMap<String, Consumer<Variant>>();
+    protected final Map<String, Consumer<Variant<?>>> handlers = new HashMap<String, Consumer<Variant<?>>>();
 
     protected boolean active = false;
 
     protected NativeBluezObject(BluezContext context, String dbusObjectPath, String primaryInterface) throws BluezException {
         this.context = context;
-        this.busConnection = context.getDbusConnection();
         this.dbusObjectPath = dbusObjectPath;
         this.primaryInterface = primaryInterface;
 
         try {
-            this.objectProperties = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
+            this.objectProperties = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
         } catch (DBusException e) {
             throw new BluezException("Unable to access properties of " + dbusObjectPath + ": " + e.getMessage(), e);
         }
@@ -82,13 +79,13 @@ public abstract class NativeBluezObject {
         activate();
     }
 
-    public void commitNotifications(Map<String, Variant> changed) {
+    public void commitNotifications(Map<String, Variant<?>> changed) {
         if (getLogger().isDebugEnabled()) {
             String props = changed.keySet().stream().collect(Collectors.joining(", "));
             getLogger().debug("Got updated properties of {} ({}) : {}", getPath(), getURL(), props);
         }
         changed.entrySet().stream().forEach((entry) -> {
-            Consumer<Variant> handler = handlers.get(entry.getKey());
+            Consumer<Variant<?>> handler = handlers.get(entry.getKey());
             if (handler == null) {
                 return;
             }
@@ -126,7 +123,7 @@ public abstract class NativeBluezObject {
         try {
             Properties properties = objectProperties;
             if (!primaryInterface.equals(iface)) {
-                properties = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
+                properties = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
             }
             properties.Set(iface, property, value);
         } catch (DBusException ex) {

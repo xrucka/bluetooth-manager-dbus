@@ -26,15 +26,15 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezFactory;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezHooks;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.GattCharacteristic1;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezObject;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacteristic;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezService;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.Variant;
+import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
+import org.freedesktop.dbus.interfaces.ObjectManager;
+import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.DataConversionUtils;
@@ -101,7 +101,7 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
         super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_CHARACTERISTIC);
 
         try {
-            this.remoteInterface = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, GattCharacteristic1.class);
+            this.remoteInterface = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, GattCharacteristic1.class);
         } catch (DBusException e) {
             throw new BluezException("Unable to bind remote object interface on " + dbusObjectPath + ": " + e.getMessage(), e);
         }
@@ -116,7 +116,7 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
                 return;
             }
 
-            BluezFactory.notifySafely(() -> {
+            context.notifySafely(() -> {
                 byte[] realData = (byte[])(data.getValue());
 
                 if (getLogger().isTraceEnabled()) {
@@ -172,9 +172,9 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
 
     @Override
     public byte[] readValue() {
-	getLogger().trace("Invoking {}() of {} ({})", "readValue", getPath(), getURL());
+        getLogger().trace("Invoking {}() of {} ({})", "readValue", getPath(), getURL());
 
-        final Map<String, Variant> options = new HashMap<String, Variant>();
+        final Map<String, Variant<?>> options = new HashMap<String, Variant<?>>();
         return this.<byte[]>callWithCleanup(
             () -> { return (byte[])(remoteInterface.ReadValue(options)); },
             () -> { context.dropCharacteristic(getURL()); }
@@ -207,9 +207,9 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
 
     @Override
     public boolean writeValue(byte[] bytes) {
-	getLogger().trace("Invoking {}() of {} ({})", "writeValue", getPath(), getURL());
+        getLogger().trace("Invoking {}() of {} ({})", "writeValue", getPath(), getURL());
 
-        Map<String, Variant> options = Collections.emptyMap();
+        Map<String, Variant<?>> options = Collections.emptyMap();
         callWithCleanup(
             () -> { remoteInterface.WriteValue(bytes, options); },
             () -> { context.dropCharacteristic(getURL()); }
@@ -225,19 +225,19 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
         Pattern descriptorPattern = Pattern.compile("^" + this.dbusObjectPath + "/descriptor[0-9a-fA-F]+$");
 
         try {
-            ObjectManager objectManager = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, "/", ObjectManager.class);
+            ObjectManager objectManager = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, "/", ObjectManager.class);
 
-            Map<Path, Map<String, Map<String, Variant>>> allObjects = objectManager.GetManagedObjects();
+            Map<DBusPath, Map<String, Map<String, Variant<?>>>> allObjects = objectManager.GetManagedObjects();
             if (allObjects == null) {
                 return false;
             }
 
-            for (Map.Entry<Path, Map<String, Map<String, Variant>>> entry : allObjects.entrySet()) {
+            for (Map.Entry<DBusPath, Map<String, Map<String, Variant<?>>>> entry : allObjects.entrySet()) {
                 if (!descriptorPattern.matcher(entry.getKey().toString()).matches()) {
                     continue;
                 }
 
-                Map<String, Map<String, Variant>> details = entry.getValue();
+                Map<String, Map<String, Variant<?>>> details = entry.getValue();
                 String uuid = details.get(primaryInterface).get("UUID").getValue().toString();
                 if (CONFIGURATION_UUID.equalsIgnoreCase(uuid)) {
                     return true;

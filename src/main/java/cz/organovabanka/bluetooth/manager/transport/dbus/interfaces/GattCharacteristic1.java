@@ -23,9 +23,9 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusInterface;
-import org.freedesktop.dbus.DBusInterfaceName;
-import org.freedesktop.dbus.Variant;
+import org.freedesktop.dbus.annotations.DBusInterfaceName;
+import org.freedesktop.dbus.interfaces.DBusInterface;
+import org.freedesktop.dbus.types.Variant;
 
 import java.util.Map;
 
@@ -35,9 +35,9 @@ import java.util.Map;
  */
 @DBusInterfaceName(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC)
 public interface GattCharacteristic1 extends DBusInterface {
-    byte[] ReadValue(Map<String, Variant> options);
+    byte[] ReadValue(Map<String, Variant<?>> options);
 
-    void WriteValue(byte[] data, Map<String, Variant> options);
+    void WriteValue(byte[] data, Map<String, Variant<?>> options);
 
     void StartNotify();
 

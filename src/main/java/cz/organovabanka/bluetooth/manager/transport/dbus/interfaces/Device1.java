@@ -23,8 +23,8 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.interfaces;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusInterface;
-import org.freedesktop.dbus.DBusInterfaceName;
+import org.freedesktop.dbus.annotations.DBusInterfaceName;
+import org.freedesktop.dbus.interfaces.DBusInterface;
 
 /**
  * Interface mirroring Bluez device interface methods.

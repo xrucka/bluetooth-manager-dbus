@@ -26,19 +26,19 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezFactory;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezHooks;
 import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Device1;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezObject;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezAdapter;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezService;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.Path;
-import org.freedesktop.dbus.UInt16;
-import org.freedesktop.dbus.UInt32;
-import org.freedesktop.dbus.Variant;
+import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
+import org.freedesktop.dbus.interfaces.ObjectManager;
+import org.freedesktop.dbus.types.UInt16;
+import org.freedesktop.dbus.types.UInt32;
+import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.DataConversionUtils;
@@ -74,7 +74,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
         super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_DEVICE);
 
         try {
-            this.remoteInterface = busConnection.getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Device1.class);
+            this.remoteInterface = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Device1.class);
         } catch (DBusException e) {
             throw new BluezException("Unable to access dbus objects for " + dbusObjectPath, e); 
         }
@@ -89,7 +89,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
                 return;
             }
 
-            BluezFactory.notifySafely(
+            context.notifySafely(
                 () -> { notificationRssi.notify(((Short)rssi.getValue()).shortValue()); }, 
                 getLogger(), dbusObjectPath + ":RSSI");
         });
@@ -99,7 +99,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
                 return;
             }
 
-            BluezFactory.notifySafely(
+            context.notifySafely(
                 () -> { notificationBlocked.notify(((Boolean)blocked.getValue()).booleanValue()); }, 
                 getLogger(), dbusObjectPath + ":Blocked"); 
         });
@@ -110,7 +110,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
 
             boolean value = ((Boolean)connected.getValue()).booleanValue();
 
-            BluezFactory.notifySafely(
+            context.notifySafely(
                 () -> { notificationConnected.notify(value); }, 
                 getLogger(), dbusObjectPath + ":Connected");
         });
@@ -121,7 +121,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
 
             boolean value = (Boolean)resolved.getValue();
 
-            BluezFactory.notifySafely(
+            context.notifySafely(
                 () -> { notificationServicesResolved.notify(value); },
                 getLogger(), dbusObjectPath + ":ServicesResolved");
         });
@@ -136,7 +136,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
                 getLogger().trace("{}: Service data changed: {}", dbusObjectPath, hexdump(rawData));
             }
 
-            BluezFactory.notifySafely(
+            context.notifySafely(
                 () -> { notificationServiceData.notify(rawData); },
                 getLogger(), dbusObjectPath + ":ServiceData");
         });
@@ -150,7 +150,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
                 getLogger().trace("{}: Manufacturer data changed: {}", dbusObjectPath, hexdump(rawData));
             }
 
-            BluezFactory.notifySafely(
+            context.notifySafely(
                 () -> { notificationManufacturerData.notify(rawData); }, 
                 getLogger(), dbusObjectPath + ":ManufacturerData");
 
@@ -182,23 +182,24 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
 
     @Override
     public boolean disconnect() {
-	getLogger().trace("Invoking {}() of {} ({})", "disconnect", getPath(), getURL());
+        getLogger().trace("Invoking {}() of {} ({})", "disconnect", getPath(), getURL());
         callWithCleanup(
             () -> { remoteInterface.Disconnect(); },
             () -> { context.dropDevice(getURL()); }
         );
-
-        return !isConnected();
+        // check whether cleanup fired
+        return context.getManagedDevice(getURL()) != null;
     }   
 
     @Override
     public boolean connect() {
-	getLogger().trace("Invoking {}() of {} ({})", "connect", getPath(), getURL());
+        getLogger().trace("Invoking {}() of {} ({})", "connect", getPath(), getURL());
         callWithCleanup(
             () -> { remoteInterface.Connect(); },
             () -> { context.dropDevice(getURL()); }
         );
-        return isConnected();
+        // check whether cleanup fired
+        return context.getManagedDevice(getURL()) != null;
     }  
  
     /* notification setters */
@@ -225,14 +226,14 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
 
     @Override
     public void enableConnectedNotifications(Notification<Boolean> notification) {
-	getLogger().debug("Explicitly enabling connected notifications for {} ({})", getPath(), getURL());
+        getLogger().debug("Explicitly enabling connected notifications for {} ({})", getPath(), getURL());
         notificationConnected = notification;
     }
 
     @Override
     public void disableConnectedNotifications() {
-	StackTraceElement[] st = Thread.currentThread().getStackTrace();
-	getLogger().debug("Explicitly disabling connected notifications for {} ({}): {}  by {} by {}", getPath(), getURL(), st[1], st[2], st[3]);
+        StackTraceElement[] st = Thread.currentThread().getStackTrace();
+        getLogger().debug("Explicitly disabling connected notifications for {} ({}): {}  by {} by {}", getPath(), getURL(), st[1], st[2], st[3]);
         notificationConnected = null;
     }
 
@@ -280,6 +281,8 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
 
     @Override
     public void dispose() {
+        disconnect();
+
         disableBlockedNotifications();
         disableConnectedNotifications();
         disableRSSINotifications();

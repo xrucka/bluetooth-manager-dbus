@@ -22,8 +22,6 @@ package cz.organovabanka.bluetooth.manager.transport.dbus;
 
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezHooks;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.ObjectManager;
-import cz.organovabanka.bluetooth.manager.transport.dbus.interfaces.Properties;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezObject;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezAdapter;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacteristic;
@@ -31,10 +29,12 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 
 import org.freedesktop.DBus;
-import org.freedesktop.dbus.DBusConnection;
-import org.freedesktop.dbus.DBusSigHandler;
+import org.freedesktop.dbus.connections.impl.DBusConnection;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
+import org.freedesktop.dbus.interfaces.DBusSigHandler;
+import org.freedesktop.dbus.interfaces.ObjectManager;
+import org.freedesktop.dbus.interfaces.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
@@ -46,7 +46,10 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Supplier;
+
 
 /**
  * Context class for all Bluez related stuff
@@ -55,7 +58,7 @@ import java.util.function.Supplier;
 public class BluezContext {
     private static final Logger logger = LoggerFactory.getLogger(BluezContext.class);
 
-    private final DBusConnection busConnection;
+    private DBusConnection busConnection;
     private String bluezProcessOwner;
 
     private DBusSigHandler<ObjectManager.InterfacesAdded> interfacesAddedHandler = null;
@@ -69,15 +72,41 @@ public class BluezContext {
 
     private ConcurrentNavigableMap<String, URL> pathURLMappings = new ConcurrentSkipListMap();
 
-
     private final BluezHooks hooks = new BluezHooks();
 
+    private static final ExecutorService NOTIFICATION_SERVICE = Executors.newCachedThreadPool();
+
     public BluezContext() throws BluezException {
+        connect();
+    }
+
+    public void connect() throws BluezException {
         try {
-            busConnection = DBusConnection.getConnection(DBusConnection.SYSTEM);
+            busConnection = DBusConnection.getConnection(DBusConnection.DBusBusType.SYSTEM, false);
         } catch (DBusException e) {
             throw new BluezException("Unable to access dbus", e);
         }
+    }
+
+    synchronized private void reset() {
+        pathURLMappings.clear();
+
+        BluezCommons.runSilently(this::unbind);
+
+        characteristicsByURL.entrySet().stream().forEach((e) -> BluezCommons.runSilently(e.getValue()::dispose));
+        characteristicsByURL.clear();
+
+        devicesByURL.entrySet().stream().forEach((e) -> BluezCommons.runSilently(e.getValue()::dispose));
+        devicesByURL.clear();
+
+        adaptersByURL.entrySet().stream().forEach((e) -> BluezCommons.runSilently(e.getValue()::dispose));
+        adaptersByURL.clear();
+
+        // should allready be disconnected
+        BluezCommons.runSilently(busConnection::disconnect);
+
+        connect();
+        bind();
     }
 
     public void setupHandlers(
@@ -144,7 +173,29 @@ public class BluezContext {
         bind();
     }
 
+    public void notifySafely(Runnable noticator, Logger logger, String path) {
+        getNotificationService().submit(() -> {
+            try {
+                noticator.run();
+            } catch (RuntimeException e) {
+                logger.error("Notification on " + path + " error: " + e.toString() + " " + e.getCause().toString());
+            } catch (Exception e) {
+                logger.error("Notification on " + path + " error: " + e.toString() + " " + e.getCause().toString());
+            }
+        });
+    }   
+
+    // done
+    private ExecutorService getNotificationService() {
+        return NOTIFICATION_SERVICE;
+    }   
+
     public DBusConnection getDbusConnection() {
+        if (!busConnection.isConnected()) {
+            logger.error("DBus connection went disconnected, attempting to reinitialize!");
+            reset();
+        }
+        // todo livecheck
         return busConnection;
     }
 
