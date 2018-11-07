@@ -56,6 +56,7 @@ import java.util.stream.Collectors;
  */
 public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscoveryHook {
     private static final String BLUEZ_IFACE_BATTERY = "org.bluez.Battery1";
+    private final Logger logger = LoggerFactory.getLogger(VirtualBatteryServiceHook.class);
 
     /**
      * Interface mirroring Bluez battery interface methods.
@@ -78,7 +79,7 @@ public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscover
         private Notification<byte[]> notificationData = null;
 
         VirtualBatteryLevelCharacteristic(BluezContext context, String dbusObjectPath, URL parentServiceURL) throws BluezException {
-            super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_CHARACTERISTIC);
+            super(context, dbusObjectPath, BLUEZ_IFACE_BATTERY);
             objectURL = makeURL(parentServiceURL);
         }
 
@@ -91,7 +92,7 @@ public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscover
             return parentServiceURL.copyWithCharacteristic(getUUID());
         }
 
-        protected Logger getLogger() {
+        public Logger getLogger() {
             return logger;
         }
 
@@ -115,7 +116,9 @@ public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscover
         @Override
         public byte[] readValue() {
             byte[] value = new byte[1];
+            getLogger().error("VirtualBattery read invoked: {} ({})", getPath(), getURL());
             Byte bval = this.<Byte>readProperty("Percentage");
+            getLogger().error("VirtualBattery: {} ({}) has {}", getPath(), getURL(), bval.toString());
             value[0] = bval.byteValue();
             return value;
         }
@@ -164,7 +167,7 @@ public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscover
             return objectURL;
         }   
 
-        protected Logger getLogger() {
+        public Logger getLogger() {
             return logger;
         }
 
@@ -194,7 +197,6 @@ public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscover
             );
             if (!(batteryCharacteristic instanceof VirtualBatteryLevelCharacteristic)) {
                 // should be always false, anyway
-                Logger logger = LoggerFactory.getLogger(VirtualBatteryService.class);
                 logger.error("BUG: Some other characteristic implementation in place of virtual battery characteristic");
             }
             characteristics.add(batteryCharacteristic);
@@ -208,6 +210,7 @@ public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscover
             Introspectable probe = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, device.getPath(), Introspectable.class);
             probed = probe.Introspect();
         } catch (DBusExecutionException | DBusException ex) {
+            logger.error("Error looking for battery service on {} ({}): {}, {}", device.getPath(), device.getURL(), ex.getClass().getName(), ex.getMessage());
             return false;
         }
 

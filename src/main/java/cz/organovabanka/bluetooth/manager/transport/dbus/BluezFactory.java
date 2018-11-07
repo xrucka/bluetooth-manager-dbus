@@ -35,6 +35,8 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezAdapter;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezCharacteristic;
 import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 import cz.organovabanka.bluetooth.manager.transport.dbus.virtual.VirtualBatteryServiceHook;
+import cz.organovabanka.bluetooth.manager.transport.dbus.wrappers.WrappedBluezAdapter;
+import cz.organovabanka.bluetooth.manager.transport.dbus.wrappers.WrappedBluezDevice;
 
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusPath;
@@ -253,6 +255,8 @@ public class BluezFactory implements BluetoothObjectFactory {
             return null;
         }
 
+        adapter = new WrappedBluezAdapter(adapter);
+
         adapter.activate();
  
         return adapter;
@@ -264,7 +268,9 @@ public class BluezFactory implements BluetoothObjectFactory {
         if (device == null) {
             return null;
         }
-        
+       
+        device = new WrappedBluezDevice(device);
+ 
         device.activate();
 
         return device;
@@ -342,7 +348,7 @@ public class BluezFactory implements BluetoothObjectFactory {
     public void dispose() {
         logger.debug("BluezFactory: general dispose");
 
-        repopulationService.shutdown();
+        repopulationService.shutdownNow();
         try {
             repopulationService.awaitTermination(30, SECONDS);
         } catch (InterruptedException e) {

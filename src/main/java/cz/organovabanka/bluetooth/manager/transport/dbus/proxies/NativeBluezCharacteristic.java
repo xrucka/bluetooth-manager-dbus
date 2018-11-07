@@ -39,18 +39,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.DataConversionUtils;
 import org.sputnikdev.bluetooth.URL;
-import org.sputnikdev.bluetooth.manager.NotReadyException;
 import org.sputnikdev.bluetooth.manager.transport.Characteristic;
 import org.sputnikdev.bluetooth.manager.transport.CharacteristicAccessType;
 import org.sputnikdev.bluetooth.manager.transport.Notification;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.Vector;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -128,7 +127,7 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
     }
 
     @Override
-    protected Logger getLogger() {
+    public Logger getLogger() {
         return logger;
     }
 
@@ -161,7 +160,7 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
 
     @Override
     public Set<CharacteristicAccessType> getFlags() {
-        Vector<String> gattFlags = this.<Vector<String>>readProperty("Flags");
+        ArrayList<String> gattFlags = this.<ArrayList<String>>readProperty("Flags");
         return parseFlags(gattFlags);
     }
 

@@ -55,15 +55,10 @@ public class NativeBluezHooks {
     public static class NativePostAdapterDiscovery implements BluezHooks.PostAdapterDiscoveryHook {
         private static Logger logger = LoggerFactory.getLogger(NativePostAdapterDiscovery.class);
         public static BluezAdapter probeAdd(BluezContext context, String objpath, Map<String, Variant<?>> vals) {
-            logger.error("probe on Adapter {}", objpath);
-		if (objpath.equals("/")) {
-			try {
-				throw new RuntimeException("a");
-			} catch (RuntimeException e) {
-				e.printStackTrace();
-			}
-		}
-
+            if (!objpath.equals(BluezCommons.parsePath(objpath, BluezAdapter.class))) {
+                logger.error("BUG: Adapter probe fired for a non-adapter path: {}", objpath);
+                return null;
+            }
 
             String address = (String)vals.get("Address").getValue();
             URL adapterURL = new URL(BluezCommons.DBUSB_PROTOCOL_NAME + "://" + address);
@@ -110,6 +105,7 @@ public class NativeBluezHooks {
             Collection<BluezAdapter> allAdapters = allObjects.entrySet().stream()
                 .filter((entry) -> adapterPattern.matcher(entry.getKey().toString()).matches())
                 .map((entry) -> probeAdd(context, entry.getKey().toString(), entry.getValue().get(BluezCommons.BLUEZ_IFACE_ADAPTER)))
+                .filter((discovered) -> (discovered != null))
                 .collect(Collectors.toSet());
 
             discoveredAdapters.addAll(allAdapters);
@@ -119,18 +115,10 @@ public class NativeBluezHooks {
     public static class NativePostDeviceDiscovery implements BluezHooks.PostDeviceDiscoveryHook {
         private static Logger logger = LoggerFactory.getLogger(NativePostDeviceDiscovery.class);
         public static BluezDevice probeAdd(BluezContext context, URL parentURL, String objpath, Map<String, Variant<?>> vals) {
-            logger.error("probe on Device {}", objpath);
-
-		if (objpath.equals("/")) {
-			try {
-				throw new RuntimeException("a");
-			} catch (RuntimeException e) {
-				e.printStackTrace();
-			}
-		}
-
-
-
+            if (!objpath.equals(BluezCommons.parsePath(objpath, BluezDevice.class))) {
+                logger.error("BUG: Device probe fired for a non-device path: {}", objpath);
+                return null;
+            }
 
             String address = (String)vals.get("Address").getValue();
             URL deviceURL = parentURL.copyWithDevice(address);
@@ -173,6 +161,7 @@ public class NativeBluezHooks {
                 Collection<BluezDevice> allDevices = allObjects.entrySet().stream()
                     .filter((entry) -> devicePattern.matcher(entry.getKey().toString()).matches())
                     .map((entry) -> probeAdd(context, adapter.getURL(), entry.getKey().toString(), entry.getValue().get(BluezCommons.BLUEZ_IFACE_DEVICE)))
+                    .filter((discovered) -> (discovered != null))
                     .filter((device) -> (device.getRSSI() != 0))
                     .collect(Collectors.toSet());
 
@@ -186,7 +175,11 @@ public class NativeBluezHooks {
     public static class NativePostServiceDiscovery implements BluezHooks.PostServiceDiscoveryHook {
         private static Logger logger = LoggerFactory.getLogger(NativePostServiceDiscovery.class);
         public static BluezService probeAdd(BluezContext context, URL parentURL, String objpath, Map<String, Variant<?>> vals) {
-            logger.error("probe o Service {}", objpath);
+            if (!objpath.equals(BluezCommons.parsePath(objpath, BluezService.class))) {
+                logger.error("BUG: Service probe fired for a non-service path: {}", objpath);
+                return null;
+            }
+
             String uuid = (String)vals.get("UUID").getValue();
             URL serviceURL = parentURL.copyWithService(uuid);
 
@@ -211,20 +204,42 @@ public class NativeBluezHooks {
             final String devicePath = device.getPath();
             final Pattern servicePattern = Pattern.compile("^" + devicePath + "/service[0-9a-fA-F]{4}$");
 
+            logger.error("About to access manager {}", device.getURL());
             Map<DBusPath, Map<String, Map<String, Variant<?>>>> allObjects = null;
             try {
                 ObjectManager objectManager = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, "/", ObjectManager.class);
+                logger.error("invoking manager");
                 allObjects = objectManager.GetManagedObjects();
             } catch (DBusException e) {
                 throw new BluezException("Unable to enumerate bluetooth objects when processing " + device.getPath(), e);
             } catch (RuntimeException e) {
                 throw new BluezException("Unable to enumerate bluetooth objects when processing " + device.getPath(), e);
             }
-
+            // from invoking manager
+            // up to here it takes 35 s.
+            // that's poor performance. Need to rewrite this stuff
+            logger.error("Probe items listed: {}", allObjects.size());
             try {
                 Collection<BluezService> allServices = allObjects.entrySet().stream()
+                    .map((entry) -> {
+                        logger.error("Probing items listed: {}", entry.getKey());
+                        return entry;
+                    })
                     .filter((entry) -> servicePattern.matcher(entry.getKey().toString()).matches())
+                    .map((entry) -> {
+                        logger.error("Item passed: {}", entry.getKey());
+                        return entry;
+                    })
                     .map((entry) -> probeAdd(context, device.getURL(), entry.getKey().toString(), entry.getValue().get(BluezCommons.BLUEZ_IFACE_SERVICE)))
+                    .map((entry) -> {
+                        logger.error("probe done");
+                        return entry;
+                    })
+                    .filter((discovered) -> (discovered != null))
+                    .map((entry) -> {
+                        logger.error("Service found: {}", entry.getURL());
+                        return entry;
+                    })
                     .collect(Collectors.toSet());
 
                 discoveredServices.addAll(allServices);
@@ -237,9 +252,13 @@ public class NativeBluezHooks {
     public static class NativePostCharacteristicDiscovery implements BluezHooks.PostCharacteristicDiscoveryHook {
         private static Logger logger = LoggerFactory.getLogger(NativePostCharacteristicDiscovery.class);
         public static BluezCharacteristic probeAdd(BluezContext context, URL parentURL, String objpath, Map<String, Variant<?>> vals) {
-            logger.error("probe on Characteristic {}", objpath);
-            String address = (String)vals.get("Address").getValue();
-            URL characteristicURL = parentURL.copyWithCharacteristic(address);
+            if (!objpath.equals(BluezCommons.parsePath(objpath, BluezCharacteristic.class))) {
+                logger.error("BUG: Characteristic probe fired for a non-characteristic path: {}", objpath);
+                return null;
+            }
+
+            String uuid = (String)vals.get("UUID").getValue();
+            URL characteristicURL = parentURL.copyWithCharacteristic(uuid);
 
             BluezCharacteristic characteristic = context.emplaceCharacteristic(characteristicURL, () -> new NativeBluezCharacteristic(context, objpath, parentURL));
             
@@ -279,6 +298,7 @@ public class NativeBluezHooks {
                 Collection<BluezCharacteristic> allCharacteristics = allObjects.entrySet().stream()
                     .filter((entry) -> characteristicPattern.matcher(entry.getKey().toString()).matches())
                     .map((entry) -> probeAdd(context, service.getURL(), entry.getKey().toString(), entry.getValue().get(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC)))
+                    .filter((discovered) -> (discovered != null))
                     .collect(Collectors.toSet());
 
                 discoveredCharacteristics.addAll(allCharacteristics);

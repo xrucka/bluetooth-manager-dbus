@@ -21,12 +21,16 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.transport;
  */
 
 import org.sputnikdev.bluetooth.manager.transport.Adapter;
+import org.slf4j.Logger;
 
 /**
  * An interface common for all adapter implementations within this transport implementation
  * @author Lukas Rucka
  */
 public interface BluezAdapter extends Adapter {
+    abstract Logger getLogger();
+
+
 
     /*
      * Mark this instance used by bluetooth-manager

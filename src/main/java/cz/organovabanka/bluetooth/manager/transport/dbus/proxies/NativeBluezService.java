@@ -64,7 +64,7 @@ public class NativeBluezService extends NativeBluezObject implements BluezServic
     }
 
     @Override
-    protected Logger getLogger() {
+    public Logger getLogger() {
         return logger;
     }   
 

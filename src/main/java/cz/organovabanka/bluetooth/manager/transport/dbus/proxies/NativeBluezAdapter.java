@@ -33,6 +33,7 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezDevice;
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
+import org.freedesktop.dbus.exceptions.DBusExecutionException;
 import org.freedesktop.dbus.interfaces.ObjectManager;
 import org.freedesktop.dbus.types.UInt32;
 import org.freedesktop.dbus.types.Variant;
@@ -64,7 +65,6 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
 
     public NativeBluezAdapter(BluezContext context, String dbusObjectPath) throws BluezException {
         super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_ADAPTER);
-        logger.error("Creating adapter for {}", dbusObjectPath);
 
         try {
             this.remoteInterface = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Adapter1.class);
@@ -74,6 +74,8 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
 
         objectURL = makeURL();
         setupHandlers();
+
+        logger.info("created bluez adapter proxy for {}", dbusObjectPath);
     }
 
     private void setupHandlers() {
@@ -98,7 +100,7 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
     }
 
     @Override
-    protected Logger getLogger() {
+    public Logger getLogger() {
         return logger;
     }
 
@@ -117,11 +119,22 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
     @Override
     public boolean stopDiscovery() {
         getLogger().trace("Invoking {}() of {} ({})", "stopDiscovery", getPath(), getURL());
+
         callWithCleanup(
-            () -> { remoteInterface.StopDiscovery(); },
+            () -> { 
+                try {
+                    remoteInterface.StopDiscovery();
+                } catch (DBusExecutionException e) {
+                    if (e.getMessage().contains("No discovery started")) {
+                        // nop, silently ignore
+                    } else {
+                        throw e;
+                    }
+                }
+            },
             () -> { context.dropAdapter(getURL()); }
         );
-        return !isDiscovering();
+        return true;
     }   
 
     @Override
@@ -136,7 +149,17 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
         );
 
         callWithCleanup(
-            () -> { remoteInterface.StartDiscovery(); },
+            () -> {
+                try {
+                    remoteInterface.StartDiscovery();
+                } catch (DBusExecutionException e) {
+                    if (e.getMessage().contains("Operation already in progress")) {
+                        // nop, silently ignore
+                    } else {
+                        throw e;
+                    }
+                }
+            },
             () -> { context.dropAdapter(getURL()); }
         );
 

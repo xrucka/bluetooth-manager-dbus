@@ -44,6 +44,8 @@ import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.DataConversionUtils;
 import org.sputnikdev.bluetooth.URL;
 import org.sputnikdev.bluetooth.manager.BluetoothAddressType;
+import org.sputnikdev.bluetooth.manager.BluetoothFatalException;
+import org.sputnikdev.bluetooth.manager.BluetoothInteractionException;
 import org.sputnikdev.bluetooth.manager.transport.Notification;
 import org.sputnikdev.bluetooth.manager.transport.Service;
 
@@ -133,7 +135,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
 
             Map<String, byte[]> rawData = convertServiceData((Map<String, Variant>)data.getValue());
             if (getLogger().isTraceEnabled()) {
-                getLogger().trace("{}: Service data changed: {}", dbusObjectPath, hexdump(rawData));
+                getLogger().trace("{}: Service data changed: {}", dbusObjectPath, BluezCommons.hexdump(rawData));
             }
 
             context.notifySafely(
@@ -147,7 +149,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
 
             Map<Short, byte[]> rawData = convertManufacturerData((Map<UInt16, Variant>)data.getValue());
             if (getLogger().isTraceEnabled()) {
-                getLogger().trace("{}: Manufacturer data changed: {}", dbusObjectPath, hexdump(rawData));
+                getLogger().trace("{}: Manufacturer data changed: {}", dbusObjectPath, BluezCommons.hexdump(rawData));
             }
 
             context.notifySafely(
@@ -158,7 +160,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
     } 
 
     @Override
-    protected Logger getLogger() {
+    public Logger getLogger() {
         return logger;
     }
 
@@ -194,8 +196,25 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
     @Override
     public boolean connect() {
         getLogger().trace("Invoking {}() of {} ({})", "connect", getPath(), getURL());
+
+        // do manual cleanup
         callWithCleanup(
-            () -> { remoteInterface.Connect(); },
+            () -> {
+                try {
+                    remoteInterface.Connect();
+                } catch (DBusExecutionException cause) {
+                    if (cause.getMessage().contains("Software caused connection abort")) {
+                        // ECONNABORTED - but where does it come from? Perhaps fatal exception is too harsh
+                        // practice shows that this is probably due to weak signal
+                        //throw new BluetoothFatalException("Could not connect: " + cause.getMessage() + "/" + cause.getType(), cause);
+                        throw new BluetoothInteractionException("Could not connect: " + cause.getMessage() + "/" + cause.getType(), cause);
+                    } else if ("org.bluez.Error.Failed".equalsIgnoreCase(cause.getType())) {
+                        throw new BluetoothFatalException("Could not connect: " + cause.getMessage() + "/" + cause.getType(), cause);
+                    } else {	
+                        throw cause;
+                    }
+                }
+             },
             () -> { context.dropDevice(getURL()); }
         );
         // check whether cleanup fired
@@ -271,12 +290,16 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
 
     @Override
     public List<Service> getServices() {
+        getLogger().debug("Accessing list of services on {} ({})", getPath(), getURL());
         List<BluezService> discoveredServices = new ArrayList<>();
         for (BluezHooks.PostServiceDiscoveryHook hook : context.getHooks().getPostServiceDiscoveryHooks()) {
+            getLogger().debug("Invoking {} on {} ({})", hook.getClass().getName(), getPath(), getURL());
             hook.trigger(this, discoveredServices, context);
         }
 
-        return discoveredServices.stream().collect(Collectors.toList());
+        List<Service> services = discoveredServices.stream().collect(Collectors.toList());
+        getLogger().debug("Services list ready {} ({})", getPath(), getURL());
+	return services;
     }
 
     @Override
@@ -391,13 +414,6 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
     }  
 
     /* service/manufacturer */
-
-    private <K> Map<String, String> hexdump(Map<K, byte[]> raw) {
-        return raw.entrySet().stream().collect(Collectors.toMap(
-            entry -> entry.getKey().toString(),
-            entry -> DataConversionUtils.convert(entry.getValue(), 16)
-        ));
-    }
 
     private Map<String, byte[]> convertServiceData(Map<String, Variant> data) {
         if (data == null) {

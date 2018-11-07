@@ -34,11 +34,13 @@ import org.freedesktop.dbus.interfaces.Properties;
 import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.sputnikdev.bluetooth.DataConversionUtils;
 import org.sputnikdev.bluetooth.URL;
 
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Common paths and names for BlueZ.
@@ -214,4 +216,16 @@ public class BluezCommons {
             /* do nothing */
         }
     }   
+
+    public static String hexdump(byte[] raw) {
+        return DataConversionUtils.convert(raw, 16);
+    }
+
+    public static <K> Map<String, String> hexdump(Map<K, byte[]> raw) {
+        return raw.entrySet().stream().collect(Collectors.toMap(
+            entry -> entry.getKey().toString(),
+            entry -> hexdump(entry.getValue())
+        ));
+    }
 }
+

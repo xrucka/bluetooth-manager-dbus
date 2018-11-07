@@ -25,6 +25,8 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
 
 import org.freedesktop.DBus;
+import org.freedesktop.dbus.errors.UnknownMethod;
+import org.freedesktop.dbus.errors.UnknownObject;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
 import org.freedesktop.dbus.exceptions.NotConnected;
@@ -34,6 +36,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.DataConversionUtils;
 import org.sputnikdev.bluetooth.URL;
+import org.sputnikdev.bluetooth.manager.BluetoothInteractionException;
+import org.sputnikdev.bluetooth.manager.BluetoothFatalException;
 import org.sputnikdev.bluetooth.manager.NotReadyException;
 import org.sputnikdev.bluetooth.manager.transport.Characteristic;
 import org.sputnikdev.bluetooth.manager.transport.CharacteristicAccessType;
@@ -62,10 +66,9 @@ public abstract class NativeBluezObject {
     protected final Properties objectProperties;
 
     protected final Map<String, Consumer<Variant<?>>> handlers = new HashMap<String, Consumer<Variant<?>>>();
-
     protected boolean active = false;
 
-    protected NativeBluezObject(BluezContext context, String dbusObjectPath, String primaryInterface) throws BluezException {
+    protected NativeBluezObject(BluezContext context, String dbusObjectPath, String primaryInterface) throws BluetoothFatalException {
         this.context = context;
         this.dbusObjectPath = dbusObjectPath;
         this.primaryInterface = primaryInterface;
@@ -73,17 +76,25 @@ public abstract class NativeBluezObject {
         try {
             this.objectProperties = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
         } catch (DBusException e) {
-            throw new BluezException("Unable to access properties of " + dbusObjectPath + ": " + e.getMessage(), e);
+            throw new BluetoothFatalException("Unable to access properties of " + dbusObjectPath + ": " + e.getMessage(), e);
         }
-
-        activate();
     }
 
     public void commitNotifications(Map<String, Variant<?>> changed) {
-        if (getLogger().isDebugEnabled()) {
-            String props = changed.keySet().stream().collect(Collectors.joining(", "));
-            getLogger().debug("Got updated properties of {} ({}) : {}", getPath(), getURL(), props);
+        if (getLogger().isInfoEnabled()) {
+            String props = changed.entrySet().stream().map((e) -> {
+                String key = e.getKey().toString();
+                String value = null;
+                if ("ay".equals(e.getValue().getSig())) {
+                    value = BluezCommons.hexdump((byte[])(e.getValue().getValue()));
+                } else {
+                    value = e.getValue().getValue().toString();
+                }
+                return e.getValue().getSig() + ":" + key + "=" + value;
+            }).collect(Collectors.joining(", "));
+            getLogger().info("Got updated properties of {} ({}) : {}", getPath(), getURL(), props);
         }
+
         changed.entrySet().stream().forEach((entry) -> {
             Consumer<Variant<?>> handler = handlers.get(entry.getKey());
             if (handler == null) {
@@ -98,27 +109,39 @@ public abstract class NativeBluezObject {
 
     protected abstract Logger getLogger();
 
-    protected <T> T readProperty(String property) {
+    protected <T> T readProperty(String property) throws BluetoothInteractionException, BluetoothFatalException {
         getLogger().trace("Reading property {}:{} of {} ({})", primaryInterface, property, getPath(), getURL());
-        return (T)objectProperties.Get(primaryInterface, property);
+        try {
+            return (T)objectProperties.Get(primaryInterface, property);
+        } catch (UnknownMethod | UnknownObject | NotConnected ex) {
+            getLogger().debug("Reading property failed {}:{} of {} ({}): {}, {}", primaryInterface, property, getPath(), getURL(), ex.getClass().getName() + "/" + ex.getType(), ex.getMessage());
+            throw new BluetoothFatalException(ex.toString(), ex);
+        } catch (DBusExecutionException ex) {
+            getLogger().debug("Reading property failed {}:{} of {} ({}): {}, {}", primaryInterface, property, getPath(), getURL(), ex.getClass().getName() + "/" + ex.getType(), ex.getMessage());
+            throw new BluetoothInteractionException(ex.toString() + "/" + ex.getType(), ex);
+        }
     }
 
-    protected <T> T readOptionalProperty(String property, Supplier<T> fallbackAction) {
+    protected <T> T readOptionalProperty(String property, Supplier<T> fallbackAction)  throws BluetoothInteractionException, BluetoothFatalException {
+        getLogger().trace("Reading optional property {}:{} of {} ({})", primaryInterface, property, getPath(), getURL());
         try {
-            return readProperty(property);
+            return (T)objectProperties.Get(primaryInterface, property);
+        } catch (UnknownMethod | UnknownObject | NotConnected ex) {
+            getLogger().debug("Reading optional property failed {}:{} of {} ({}): {}, {}", primaryInterface, property, getPath(), getURL(), ex.getClass().getName() + "/" + ex.getType(), ex.getMessage());
+            throw new BluetoothFatalException(ex.toString(), ex);
         } catch (DBusExecutionException ex) {
-            // perhaps checking for org.freedesktop.DBus.Error.InvalidArgs in getType() would be better
             if (ex.getMessage().contains("No such property")) {
                 // do fallback
             } else {
-                throw ex;
+                 getLogger().debug("Reading optional property failed {}:{} of {} ({}): {}, {}", primaryInterface, property, getPath(), getURL(), ex.getClass().getName() + "/" + ex.getType(), ex.getMessage());
+                throw new BluetoothInteractionException(ex.toString() + "/" + ex.getType(), ex);
             }
         }
 
         return fallbackAction.get();
     }
 
-    protected <T> void writeProperty(String iface, String property, T value) throws NotReadyException {
+    protected <T> void writeProperty(String iface, String property, T value) throws BluetoothInteractionException, BluetoothFatalException {
         getLogger().trace("Writing property {}:{}={} of {} ({})", iface, property, value.toString(), getPath(), getURL());
         try {
             Properties properties = objectProperties;
@@ -126,8 +149,10 @@ public abstract class NativeBluezObject {
                 properties = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, dbusObjectPath, Properties.class);
             }
             properties.Set(iface, property, value);
+        } catch (UnknownMethod | UnknownObject ex) {
+            throw new BluetoothFatalException(ex.toString(), ex);
         } catch (DBusException ex) {
-            throw new NotReadyException(ex.toString());
+            throw new BluetoothInteractionException(ex.toString());
         }
     }
 
@@ -152,54 +177,47 @@ public abstract class NativeBluezObject {
         active = false;
     }
 
-    protected <T> T callWithCleanup(Callable<T> call, Runnable disposer) throws NotReadyException {
+    protected <T> T callWithCleanup(Callable<T> call, Runnable disposer) throws BluetoothInteractionException, BluetoothFatalException {
         try {
             return call.call();
-        } catch (NotConnected cause) {
-            throw new NotReadyException("Device is not connected " + getPath());
+        } catch (UnknownObject cause) { 
+            // unknown object - probably device deleted/disconnected, etc.
+            disposer.run();
+            throw new BluetoothFatalException(cause.toString(), cause);
         } catch (DBusExecutionException cause) {
-            if (cause.getMessage().matches("^.*Method \".*\" with signature \".*\" on interface .*$")) {
-                disposer.run();
-            } else if (cause.getMessage().matches("^.*[Nn]ot connected.*$")) {
-                throw new NotReadyException("Device is not connected " + getPath());
-            } else {
-                throw new NotReadyException(cause.toString());
-            }
+            disposer.run();
+            throw new BluetoothInteractionException(cause.getType() + ":" + cause.toString(), cause);
+	} catch (BluetoothFatalException | BluetoothInteractionException | NotReadyException passed) {
+            // this line ensures that allready processed exceptions in callable do not get processed twice
+            throw passed;
         } catch (RuntimeException cause) {
-            if (cause.getMessage().matches("^.*Method \".*\" with signature \".*\" on interface .*$")) {
-                disposer.run();
-            } else if (cause.getMessage().matches("^.*[Nn]ot connected.*$")) {
-                throw new NotReadyException("Device is not connected " + getPath());
-            } else {
-                throw cause;
-            }
+            disposer.run();
+            throw cause;
         } catch (Exception cause) {
-            throw new NotReadyException("Generic failure on " + getPath());
+            disposer.run();
+            throw new BluetoothInteractionException("Generic failure on " + getPath() + ": " + cause.getMessage());
         }
-        return null;
     }
 
-    protected void callWithCleanup(Runnable call, Runnable disposer) throws NotReadyException {
+    protected void callWithCleanup(Runnable call, Runnable disposer) throws BluetoothInteractionException, BluetoothFatalException {
         try {
             call.run();
-        } catch (NotConnected cause) {
-            throw new NotReadyException("Device is not connected " + getPath());
+         } catch (UnknownObject cause) { 
+            // unknown object - probably device deleted/disconnected, etc.
+            disposer.run();
+            throw new BluetoothFatalException(cause.toString(), cause);
         } catch (DBusExecutionException cause) {
-            if (cause.getMessage().matches("^.*Method \".*\" with signature \".*\" on interface .*$")) {
-                disposer.run();
-            } else if (cause.getMessage().matches("^.*[Nn]ot connected.*$")) {
-                throw new NotReadyException("Device is not connected " + getPath());
-            } else {
-                throw new NotReadyException(cause.toString());
-            }
+            disposer.run();
+            throw new BluetoothInteractionException(cause.getType() + ":" + cause.toString(), cause);
+	} catch (BluetoothFatalException | BluetoothInteractionException | NotReadyException passed) {
+            // this line ensures that allready processed exceptions in callable do not get processed twice
+            throw passed;
         } catch (RuntimeException cause) {
-            if (cause.getMessage().matches("^.*Method \".*\" with signature \".*\" on interface .*$")) {
-                disposer.run();
-            } else if (cause.getMessage().matches("^.*[Nn]ot connected.*$")) {
-                throw new NotReadyException("Device is not connected " + getPath());
-            } else {
-                throw new NotReadyException(cause.toString());
-            }
+            disposer.run();
+            throw cause;
+        } catch (Exception cause) {
+            disposer.run();
+            throw new BluetoothInteractionException("Generic failure on " + getPath() + ": " + cause.getMessage());
         }
     }
 }

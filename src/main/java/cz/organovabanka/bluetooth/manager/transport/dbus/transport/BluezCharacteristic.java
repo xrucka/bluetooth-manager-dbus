@@ -21,12 +21,14 @@ package cz.organovabanka.bluetooth.manager.transport.dbus.transport;
  */
 
 import org.sputnikdev.bluetooth.manager.transport.Characteristic;
+import org.slf4j.Logger;
 
 /**
  * A interface common for all characteristic implementations within this transport implementation
  * @author Lukas Rucka
  */
 public interface BluezCharacteristic extends Characteristic {
+	abstract Logger getLogger();
 
     /*
      * Mark this instance used by bluetooth-manager
