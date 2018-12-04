@@ -32,8 +32,10 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezService;
 
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusPath;
+import org.freedesktop.dbus.errors.UnknownMethod;
+import org.freedesktop.dbus.errors.UnknownObject;
 import org.freedesktop.dbus.exceptions.DBusException;
-import org.freedesktop.dbus.interfaces.ObjectManager;
+import org.freedesktop.dbus.interfaces.Properties;
 import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,6 +109,8 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
 
         objectURL = makeURL(parentServiceURL);
         setupHandlers();
+
+        logger.info("Created bluez characteristic proxy for {}", getPath());
     }
 
     private void setupHandlers() {
@@ -147,6 +151,7 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
 
     @Override
     public void dispose() {
+        getLogger().trace("Invoking {}() of {} ({})", "dispose", getPath(), getURL());
         disableValueNotifications();
         super.dispose();
     }
@@ -160,12 +165,17 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
 
     @Override
     public Set<CharacteristicAccessType> getFlags() {
+        getLogger().trace("Invoking {}() of {} ({})", "getFlags", getPath(), getURL());
         ArrayList<String> gattFlags = this.<ArrayList<String>>readProperty("Flags");
+        if (getLogger().isTraceEnabled()) {
+            getLogger().trace("\t {} Flags: {}", getPath(), gattFlags.stream().collect(Collectors.joining(", ")));
+        }
         return parseFlags(gattFlags);
     }
 
     @Override
     public boolean isNotifying() {
+        getLogger().trace("Invoking {}() of {} ({})", "isNotifying", getPath(), getURL());
         return this.<Boolean>readOptionalProperty("Notifying", () -> new Boolean(false));
     }
 
@@ -223,31 +233,27 @@ public class NativeBluezCharacteristic extends NativeBluezObject implements Blue
         // has only local version, as remote calls are done only as scans
         Pattern descriptorPattern = Pattern.compile("^" + this.dbusObjectPath + "/descriptor[0-9a-fA-F]+$");
 
-        try {
-            ObjectManager objectManager = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, "/", ObjectManager.class);
-
-            Map<DBusPath, Map<String, Map<String, Variant<?>>>> allObjects = objectManager.GetManagedObjects();
-            if (allObjects == null) {
-                return false;
+        Collection<String> descriptors = BluezCommons.introspectSubpaths(context, getPath());
+        for (String subpath : descriptors) {
+            if (!descriptorPattern.matcher(subpath).matches()) {
+                continue;
             }
 
-            for (Map.Entry<DBusPath, Map<String, Map<String, Variant<?>>>> entry : allObjects.entrySet()) {
-                if (!descriptorPattern.matcher(entry.getKey().toString()).matches()) {
-                    continue;
-                }
+            // gatt properties org.bluez.GattDescriptor1
+            try {
+                Properties properties = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, subpath, Properties.class);
+                String uuid = properties.Get(BluezCommons.BLUEZ_IFACE_DESCRIPTOR, "UUID");
 
-                Map<String, Map<String, Variant<?>>> details = entry.getValue();
-                String uuid = details.get(primaryInterface).get("UUID").getValue().toString();
                 if (CONFIGURATION_UUID.equalsIgnoreCase(uuid)) {
                     return true;
                 }
-            }
-            
-            return false;
-        } catch (DBusException e) {
-            getLogger().error("{}: Unable to read descriptor", dbusObjectPath); 
-            return false;
+            } catch (UnknownMethod | UnknownObject | DBusException ex) {
+                // silently continue, try other
+                getLogger().trace("Unable to read characteristic descriptor {}: {}", subpath, ex.getMessage());
+            }   
         }
+
+        return false;
     }
 
     @Override

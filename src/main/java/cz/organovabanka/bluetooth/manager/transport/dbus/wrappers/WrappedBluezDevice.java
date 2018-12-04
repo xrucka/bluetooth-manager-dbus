@@ -36,7 +36,6 @@ import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
-import org.freedesktop.dbus.interfaces.ObjectManager;
 import org.freedesktop.dbus.types.UInt16;
 import org.freedesktop.dbus.types.UInt32;
 import org.freedesktop.dbus.types.Variant;
@@ -400,6 +399,7 @@ public class WrappedBluezDevice implements BluezDevice {
             throw e;
         }
     }
+
     public void activate() {
         try {
             delegate.activate();
@@ -409,6 +409,7 @@ public class WrappedBluezDevice implements BluezDevice {
             throw e;
         }
     }
+
     public Map<Short, byte[]> getManufacturerData() {
         try {
             return delegate.getManufacturerData();
@@ -418,6 +419,7 @@ public class WrappedBluezDevice implements BluezDevice {
             throw e;
         }
     }
+
     public Map<String, byte[]> getServiceData() {
         try {
             return delegate.getServiceData();

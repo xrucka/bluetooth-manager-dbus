@@ -33,7 +33,6 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezService;
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
-import org.freedesktop.dbus.interfaces.ObjectManager;
 import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -182,6 +181,7 @@ public class WrappedBluezCharacteristic implements BluezCharacteristic {
             throw e;
         }
     }
+
     public void activate() {
         try {
             delegate.activate();

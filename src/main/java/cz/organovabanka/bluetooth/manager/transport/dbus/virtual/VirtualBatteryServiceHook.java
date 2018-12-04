@@ -36,7 +36,6 @@ import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
 import org.freedesktop.dbus.interfaces.DBusInterface;
 import org.freedesktop.dbus.interfaces.Introspectable;
-import org.freedesktop.dbus.interfaces.ObjectManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.URL;
@@ -116,9 +115,7 @@ public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscover
         @Override
         public byte[] readValue() {
             byte[] value = new byte[1];
-            getLogger().error("VirtualBattery read invoked: {} ({})", getPath(), getURL());
             Byte bval = this.<Byte>readProperty("Percentage");
-            getLogger().error("VirtualBattery: {} ({}) has {}", getPath(), getURL(), bval.toString());
             value[0] = bval.byteValue();
             return value;
         }
@@ -220,7 +217,7 @@ public class VirtualBatteryServiceHook implements BluezHooks.PostServiceDiscover
     }
 
     @Override
-    public void trigger(BluezDevice device, List<BluezService> discoveredServices, BluezContext context) {
+    public void trigger(BluezContext context, BluezDevice device, List<BluezService> discoveredServices) {
         if (!(device instanceof NativeBluezDevice)) {
             return;
         }

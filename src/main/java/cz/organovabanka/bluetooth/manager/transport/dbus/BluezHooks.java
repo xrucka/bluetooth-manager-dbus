@@ -37,25 +37,25 @@ import java.util.List;
  */
 public class BluezHooks {
     public interface PostAdapterDiscoveryHook {
-        void trigger(List<BluezAdapter> discoveredAdapters, BluezContext context);
+        void trigger(BluezContext context, List<BluezAdapter> discoveredAdapters);
     }
 
     private final List<PostAdapterDiscoveryHook> postAdapterDiscoveryHooks = new ArrayList<>();
 
     public interface PostDeviceDiscoveryHook {
-        void trigger(BluezAdapter parentAdapter, List<BluezDevice> discoveredDevices, BluezContext context);
+        void trigger(BluezContext context, BluezAdapter parentAdapter, List<BluezDevice> discoveredDevices);
     }
 
     private final List<PostDeviceDiscoveryHook> postDeviceDiscoveryHooks = new ArrayList<>();
 
     public interface PostServiceDiscoveryHook {
-        void trigger(BluezDevice parentDevice, List<BluezService> discoveredServices, BluezContext context);
+        void trigger(BluezContext context, BluezDevice parentDevice, List<BluezService> discoveredServices);
     }
 
     private final List<PostServiceDiscoveryHook> postServiceDiscoveryHooks = new ArrayList<>();
 
     public interface PostCharacteristicDiscoveryHook {
-        void trigger(BluezService parentService, List<BluezCharacteristic> discoveredCharacteristics, BluezContext context);
+        void trigger(BluezContext context, BluezService parentService, List<BluezCharacteristic> discoveredCharacteristics);
     }
 
     private final List<PostCharacteristicDiscoveryHook> postCharacteristicDiscoveryHooks = new ArrayList<>();

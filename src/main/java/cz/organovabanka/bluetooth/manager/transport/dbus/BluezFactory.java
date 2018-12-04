@@ -25,6 +25,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezCommons;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezContext;
 import cz.organovabanka.bluetooth.manager.transport.dbus.BluezException;
+import cz.organovabanka.bluetooth.manager.transport.dbus.BluezHooks;
 import cz.organovabanka.bluetooth.manager.transport.dbus.PropertiesChangedHandler;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezAdapter;
 import cz.organovabanka.bluetooth.manager.transport.dbus.proxies.NativeBluezCharacteristic;
@@ -56,6 +57,7 @@ import org.sputnikdev.bluetooth.manager.transport.Adapter;
 import org.sputnikdev.bluetooth.manager.transport.BluetoothObjectFactory;
 import org.sputnikdev.bluetooth.manager.transport.Device;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
@@ -145,16 +147,16 @@ public class BluezFactory implements BluetoothObjectFactory {
     }
 
 
-    public void probeAdd(String path, String dbusInterface, Map<String, Variant<?>> values) {
+    public void probeAdd(String path, String dbusInterface) {
         // dbus-java 3.0.0 fires interfaces added even on root paths, not only correct paths; ignore the missfires by checking path
         if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_ADAPTER) && path.equals(BluezCommons.parsePath(path, BluezAdapter.class))) {
-            (new NativeBluezHooks.NativePostAdapterDiscovery()).probeAdd(context, path, values);
+            (new NativeBluezHooks.NativePostAdapterDiscovery()).probeAdd(context, path);
         } else if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_DEVICE) && path.equals(BluezCommons.parsePath(path, BluezDevice.class))) {
-            (new NativeBluezHooks.NativePostDeviceDiscovery()).probeAdd(context, makeAdapterURL(path), path, values);
+            (new NativeBluezHooks.NativePostDeviceDiscovery()).probeAdd(context, makeAdapterURL(path), path);
         } else if (dbusInterface.equals(BluezCommons.BLUEZ_IFACE_CHARACTERISTIC) && path.equals(BluezCommons.parsePath(path, BluezCharacteristic.class))) {
             URL deviceURL = makeDeviceURL(path);
             URL serviceURL = new NativeBluezService(context, path, deviceURL).getURL();
-            (new NativeBluezHooks.NativePostCharacteristicDiscovery()).probeAdd(context, serviceURL, path, values);
+            (new NativeBluezHooks.NativePostCharacteristicDiscovery()).probeAdd(context, serviceURL, path);
         }
         // no other handled
     }
@@ -163,7 +165,7 @@ public class BluezFactory implements BluetoothObjectFactory {
         public void handle(ObjectManager.InterfacesAdded s) {
             String objpath = s.getObjectPath().toString();
             for (Map.Entry<String, Map<String, Variant<?>>> pathEntry : s.getInterfaces().entrySet()) {
-                probeAdd(objpath, pathEntry.getKey(), pathEntry.getValue());
+                probeAdd(objpath, pathEntry.getKey());
             }
         }
     }
@@ -215,38 +217,20 @@ public class BluezFactory implements BluetoothObjectFactory {
     }
 
     private void populate() {
-        ObjectManager objectManager = null;
-
         /* populate adapters */
-        try {
-            objectManager = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, "/", ObjectManager.class);
-        } catch (DBusException e) {
-            throw new BluezException("Unable to access dbus objects to enumerate bluetooth adapters", e);
+        ArrayList<BluezAdapter> dummyAdapters = new ArrayList<>();
+        for (BluezHooks.PostAdapterDiscoveryHook adapterDiscovery : context.getHooks().getPostAdapterDiscoveryHooks()) {
+            adapterDiscovery.trigger(context, dummyAdapters);
         }
-
-        Map<DBusPath, Map<String, Map<String, Variant<?>>>> allObjects = null;
-        try {
-            allObjects = objectManager.GetManagedObjects();
-        } catch (RuntimeException ex) {
-            throw new BluezException("Error populating adapters", ex);
+        
+        /* popoulate initial devices */
+        ArrayList<BluezDevice> dummyDevices = new ArrayList<>();
+        for (BluezAdapter adapter : context.getManagedAdapters()) {
+            for (BluezHooks.PostDeviceDiscoveryHook deviceDiscovery : context.getHooks().getPostDeviceDiscoveryHooks()) {
+                deviceDiscovery.trigger(context, adapter, dummyDevices);
+            }
         }
-
-        if (allObjects == null) {
-            throw new BluezException("Error populating adapters, got no objects");
-        }
-
-        // ensure adapters are populated before adding devices
-        Pattern adapterPattern = BluezCommons.makeAdapterPathPattern();
-        allObjects.entrySet().stream()
-            .filter((entry) -> adapterPattern.matcher(entry.getKey().toString()).matches())
-            .forEach((entry) -> probeAdd(entry.getKey().toString(), BluezCommons.BLUEZ_IFACE_ADAPTER, entry.getValue().get(BluezCommons.BLUEZ_IFACE_ADAPTER)));
-
-        Pattern devicePattern = BluezCommons.makeDevicePathPattern(".*/hci[0-9a-fA-F]+");
-        allObjects.entrySet().stream()
-            .filter((entry) -> devicePattern.matcher(entry.getKey().toString()).matches())
-            //.forEach((entry) -> logger.error("Matched device {} {}", entry.getKey().toString(), devicePattern.matcher(entry.getKey().toString()).matches()));
-            .forEach((entry) -> probeAdd(entry.getKey().toString(), BluezCommons.BLUEZ_IFACE_DEVICE, entry.getValue().get(BluezCommons.BLUEZ_IFACE_DEVICE)));
-    }
+   }
 
     @Override
     public BluezAdapter getAdapter(URL url) {

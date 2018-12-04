@@ -34,7 +34,6 @@ import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
-import org.freedesktop.dbus.interfaces.ObjectManager;
 import org.freedesktop.dbus.types.UInt32;
 import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
@@ -75,7 +74,7 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
         objectURL = makeURL();
         setupHandlers();
 
-        logger.info("created bluez adapter proxy for {}", dbusObjectPath);
+        logger.info("Created bluez adapter proxy for {}", dbusObjectPath);
     }
 
     private void setupHandlers() {
@@ -199,8 +198,8 @@ public class NativeBluezAdapter extends NativeBluezObject implements BluezAdapte
     public List<Device> getDevices() {
         List<BluezDevice> discoveredDevices = new ArrayList<>();
         for (BluezHooks.PostDeviceDiscoveryHook hook : context.getHooks().getPostDeviceDiscoveryHooks()) {
-            hook.trigger(this, discoveredDevices, context);
-            //BluezCommons.runSafely(() -> { hook.trigger(this, discoveredDevices, context); });
+            hook.trigger(context, this, discoveredDevices);
+            //BluezCommons.runSafely(() -> { hook.trigger(context, this, discoveredDevices); });
         }
 
         return discoveredDevices.stream().collect(Collectors.toList());

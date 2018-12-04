@@ -34,7 +34,6 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezService;
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
-import org.freedesktop.dbus.interfaces.ObjectManager;
 import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,6 +60,8 @@ public class NativeBluezService extends NativeBluezObject implements BluezServic
     public NativeBluezService(BluezContext context, String dbusObjectPath, URL parentDeviceURL) {
         super(context, dbusObjectPath, BluezCommons.BLUEZ_IFACE_SERVICE);
         objectURL = makeURL(parentDeviceURL);
+
+        logger.info("Created lightweight bluez service proxy for {}", getPath());
     }
 
     @Override
@@ -91,7 +92,7 @@ public class NativeBluezService extends NativeBluezObject implements BluezServic
     public List<Characteristic> getCharacteristics() {
         List<BluezCharacteristic> discoveredCharacteristics = new ArrayList<>();
         for (BluezHooks.PostCharacteristicDiscoveryHook hook : context.getHooks().getPostCharacteristicDiscoveryHooks()) {
-            hook.trigger(this, discoveredCharacteristics, context);
+            hook.trigger(context, this, discoveredCharacteristics);
         }
         return discoveredCharacteristics.stream().collect(Collectors.toList());
     }

@@ -35,7 +35,6 @@ import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
-import org.freedesktop.dbus.interfaces.ObjectManager;
 import org.freedesktop.dbus.types.UInt16;
 import org.freedesktop.dbus.types.UInt32;
 import org.freedesktop.dbus.types.Variant;
@@ -83,6 +82,8 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
 
         objectURL = makeURL(parentAdapterURL);
         setupHandlers();
+
+	logger.info("Created bluez device proxy for {}", getPath());
     }
 
     private void setupHandlers() {
@@ -208,6 +209,9 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
                         // practice shows that this is probably due to weak signal
                         //throw new BluetoothFatalException("Could not connect: " + cause.getMessage() + "/" + cause.getType(), cause);
                         throw new BluetoothInteractionException("Could not connect: " + cause.getMessage() + "/" + cause.getType(), cause);
+                    } else if (cause.getMessage().contains("Operation already in progress")) {
+                        getLogger().info("Connect on {} ({}): {}", getPath(), getURL(), cause.getMessage());
+                        // make it look like we did not do anything bad (actually, let return of connect() handle the stuff)
                     } else if ("org.bluez.Error.Failed".equalsIgnoreCase(cause.getType())) {
                         throw new BluetoothFatalException("Could not connect: " + cause.getMessage() + "/" + cause.getType(), cause);
                     } else {	
@@ -294,7 +298,7 @@ public class NativeBluezDevice extends NativeBluezObject implements BluezDevice 
         List<BluezService> discoveredServices = new ArrayList<>();
         for (BluezHooks.PostServiceDiscoveryHook hook : context.getHooks().getPostServiceDiscoveryHooks()) {
             getLogger().debug("Invoking {} on {} ({})", hook.getClass().getName(), getPath(), getURL());
-            hook.trigger(this, discoveredServices, context);
+            hook.trigger(context, this, discoveredServices);
         }
 
         List<Service> services = discoveredServices.stream().collect(Collectors.toList());

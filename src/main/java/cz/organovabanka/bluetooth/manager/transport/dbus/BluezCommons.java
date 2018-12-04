@@ -29,18 +29,35 @@ import cz.organovabanka.bluetooth.manager.transport.dbus.transport.BluezService;
 import org.freedesktop.DBus;
 import org.freedesktop.dbus.DBusPath;
 import org.freedesktop.dbus.exceptions.DBusException;
-import org.freedesktop.dbus.interfaces.ObjectManager;
+import org.freedesktop.dbus.interfaces.Introspectable;
 import org.freedesktop.dbus.interfaces.Properties;
 import org.freedesktop.dbus.types.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sputnikdev.bluetooth.DataConversionUtils;
 import org.sputnikdev.bluetooth.URL;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.EntityResolver;
 
+import java.io.IOException;
+import java.io.StringReader;
+import java.io.ByteArrayInputStream;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.stream.XMLStreamException;
 
 /**
  * Common paths and names for BlueZ.
@@ -127,71 +144,6 @@ public class BluezCommons {
         return null;
     }
 
-    public static String pathForUrl(BluezContext context, URL url, Class stopper) throws BluezException {
-        if (url.getProtocol() != BluezCommons.DBUSB_PROTOCOL_NAME) {
-            throw new BluezException("Invalid protocol " + url.getProtocol() + " for this transport provider");
-        }
-
-        ObjectManager objectManager = null;
-        try {
-            objectManager = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, "/", ObjectManager.class);
-        } catch (DBusException e) {
-            throw new BluezException("Unable to access dbus base services on bus " + BluezCommons.BLUEZ_DBUS_BUSNAME, e);
-        }
-
-        Map<DBusPath, Map<String, Map<String, Variant<?>>>> allObjects = objectManager.GetManagedObjects();
-        if (allObjects == null) {
-            logger.error("Bluez subsystem not available");
-            return null;
-        }
-
-        String adapterMac = url.getAdapterAddress();
-        Pattern adapterPattern = BluezCommons.makeAdapterPathPattern();
-        String adapterPath = matchBluezObject(allObjects, adapterPattern, BluezCommons.BLUEZ_IFACE_ADAPTER, "Address", adapterMac);
-
-        if (stopper == BluezAdapter.class) {
-            return adapterPath;
-        }
-        if (adapterPath == null) {
-            logger.debug("Inexistent adapter requested (" + adapterMac + ")");
-            return null;
-        }
-
-        String deviceMac = url.getDeviceAddress();
-        Pattern devicePattern = BluezCommons.makeDevicePathPattern(adapterPath);
-        String devicePath = matchBluezObject(allObjects, devicePattern, BluezCommons.BLUEZ_IFACE_DEVICE, "Address", deviceMac);
-
-        if (stopper == BluezDevice.class) {
-            return devicePath;
-        }
-        if (devicePath == null) {
-            logger.debug("Device not found under such adapter (" + deviceMac + ")");
-            return null;
-        }
-
-        String serviceUuid = url.getServiceUUID();
-        Pattern servicePattern = BluezCommons.makeServicePathPattern(devicePath);
-        String servicePath = matchBluezObject(allObjects, servicePattern, BluezCommons.BLUEZ_IFACE_SERVICE, "UUID", serviceUuid);
-
-        if (stopper == BluezService.class) {
-            return servicePath;
-        }
-        if (servicePath == null) {
-            logger.debug("Service not found under such device (service " + serviceUuid + ")");
-            return null;
-        }
-
-        String characteristicUuid = url.getCharacteristicUUID();
-        Pattern characteristicPattern = BluezCommons.makeServicePathPattern(devicePath);
-        String characteristicPath = matchBluezObject(allObjects, characteristicPattern, BluezCommons.BLUEZ_IFACE_SERVICE, "UUID", characteristicUuid);
-
-        if (stopper == BluezCharacteristic.class) {
-            return characteristicPath;
-        }
-
-        logger.trace("Characteristic not found under service (characteristic " + characteristicUuid + ")");
-        return null;
-    }
 
     public static <T> T readProperty(String iface, String property, Properties props, String objectPath) throws BluezException {
         try {
@@ -227,5 +179,70 @@ public class BluezCommons {
             entry -> hexdump(entry.getValue())
         ));
     }
-}
 
+    public static List<String> introspectSubpaths(BluezContext context, String rootPath) {
+        // https://examples.javacodegeeks.com/core-java/xml/java-xml-parser-tutorial/
+        // https://www.baeldung.com/java-xml
+
+        String introspectionXML = null;
+
+        /* populate adapters */
+        try {
+            Introspectable dbusProbe = context.getDbusConnection().getRemoteObject(BluezCommons.BLUEZ_DBUS_BUSNAME, rootPath, Introspectable.class);
+            introspectionXML = dbusProbe.Introspect();	
+        } catch (DBusException e) {
+            throw new BluezException("Unable to introspect dbus objects underneath blaccess dbus objects to enumerate bluetooth adapters: " + e.getMessage(), e); 
+        }
+
+        InputSource stream = new InputSource();
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setValidating(false);
+        factory.setNamespaceAware(false);
+        factory.setXIncludeAware(false);
+        factory.setExpandEntityReferences(false);
+        factory.setSchema(null);
+
+        DocumentBuilder builder = null;
+        try {
+            builder = factory.newDocumentBuilder();
+        } catch (ParserConfigurationException e) {
+            logger.error("Could not create document builder for {}: {} {}", rootPath, e.getMessage(), introspectionXML);
+            return Collections.emptyList();
+        }
+
+        builder.setEntityResolver(new EntityResolver() {
+            public InputSource resolveEntity(String publicID, String systemID) throws SAXException, IOException {
+                if (systemID.contains("introspect.dtd")) {
+                    //return empty source
+                    return new InputSource(
+                        new ByteArrayInputStream("<?xml version='1.0' encoding='UTF-8'?>".getBytes())
+                    );
+                } else {
+                    return null;
+                }
+            }
+        });
+
+        stream.setCharacterStream(new StringReader(introspectionXML));
+        Document introspected = null;
+        try {
+            introspected = builder.parse(stream);
+        } catch (SAXException | IOException e) {
+            logger.error("Could not process introspection xml for {}: {} {}", rootPath, e.getMessage(), introspectionXML);
+            return Collections.emptyList();
+        }
+
+        List<String> subpaths = new ArrayList<>();
+        Element rootnode = introspected.getDocumentElement();
+        //NodeList entries = rootNode.getElementsByTagName("node");
+        NodeList entries = introspected.getElementsByTagName("node");
+        // 0 is root node
+        for (int i = 1; i < entries.getLength(); ++i) {
+            String tpath = rootPath + "/" + ((Element)entries.item(i)).getAttribute("name");
+            subpaths.add(tpath);
+        }
+        
+        return subpaths;
+    }
+
+}
